@@ -19,6 +19,10 @@ class ConversationV031(unittest.TestCase):
    with self.assertRaises(RuntimeError):server.chat_once('open qq','b'*32)
   with patch('server.chat') as chat:
    self.assertTrue(server.chat_once('open qq','b'*32)['pending']);chat.assert_not_called()
+ def test_route_request_without_origin_does_not_invent_lines(self):
+  with patch('maps_routes.status',return_value={'configured':False}):
+   result=server.local_chat('帮我查查怎么去深圳北站？')
+  self.assertIn('从哪里出发',result['reply']);self.assertNotIn('1号线',result['reply'])
  def test_empty_model_response_is_retryable_error(self):
   with self.assertRaisesRegex(ValueError,'没有返回'):
    server.consume_model_result({'calls':[],'text':'  ','model':'test','usage':{}},'hello','id','local',{})

@@ -1,7 +1,16 @@
+# 0.3.2新增：双本机模型与经验适配
+
+- local_models.py：官方4B/8B目录、自动复杂度判断、3分钟8B保温避免抖动、手动固定选择；单个llama-server，不同时加载两套权重。显存计划按可用显存和16K F16 KV估算，不能保证不影响游戏；失败可CPU运行。
+- local_runtime.py/local_persona.py：共享小祥精简角色提示、只读引用记忆、工具白名单；自动模式4B输出格式失效时可在工具执行前升级8B一次，不重复执行工具。不会因为本地失败而自动付费调用云端。
+- local_adaptation.py：本机明确偏好/纠错/人类示例检索，默认启用，可看/删/关闭/手动教；本机权重未训练，不把模型答案喂回去，不声称完成LoRA。真实用户适配记录未上传。
+- API：GET /api/local/model；POST /api/local/model/control {operation:select,model:auto或qwen3-4b-q4_k_m或qwen3-8b-q4_k_m}；GET/PATCH /api/local/adaptation，POST /api/local/adaptation/teach，DELETE /api/local/adaptation/{id}。
+- 8B官方元信息assets/qwen8b-official.json；实际下载与最终验收状态以本地交付记录为准，不从存在安装代码推断模型已装。
+
+---
 # 开发续接
 
 ## 先读
-- 本版0.3.1；此前已实际运行，不要当成纯样图重建。
+- 本版0.3.2；此前已实际运行，不要当成纯样图重建。
 - Python服务 `companion-app/server.py`，前端 `web/app.js`，布局 `web/style.css`/`experience.css`，窗口宿主 `workspace_host.py`。
 - 音乐 `music_service.py`、`music_bridge.cjs`、`web/netease-player.js`、`music-pet.js`；宠物 `companion.js`、`pet-motion.js`、`pet-physics.js`、`live2d-pet.js`。
 - `app_paths.py` 统一数据到仓库旁 `companion-data/`（ignored）；原机器项目目录为D:/StudyLifePlan，但不要依赖该绝对目录。
@@ -25,4 +34,4 @@
 - 重大修改先备份并记录，避免额度中断丢失进度；不要把Linux静态验证冒充Windows桌面验收。
 
 ## 复核证据
-本机90项Python测试及9个Node文件通过。实际Edge夹具验证五套Live2D及快速摸头/裁切；实际网易云搜索并播放后暂停；实际Qwen中文和typed health工具成功。相关个人日志/截图未上传，证据仅在原机，不宣称克隆后已经复验。
+本机111项Python测试及11个Node文件通过。实际Edge夹具验证五套Live2D及快速摸头/裁切；实际网易云搜索并播放后暂停；实际Qwen中文和typed health工具成功。相关个人日志/截图未上传，证据仅在原机，不宣称克隆后已经复验。

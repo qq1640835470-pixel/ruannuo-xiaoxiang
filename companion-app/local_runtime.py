@@ -2,10 +2,11 @@
 from __future__ import annotations
 import atexit,json,pathlib,re,secrets,subprocess,threading,time,urllib.request,urllib.error
 import local_runtime_setup as setup
+import local_models,app_paths,local_adaptation,runtime_log,local_persona
 from web_tools import NoRedirect
 MODEL='qwen3-4b-q4_k_m'
 HOST='http://127.0.0.1:18766'
-_LOCK=threading.RLock();_PROCESS=None;_KEY=secrets.token_urlsafe(32);_BACKEND='';_LAST_ERROR=''
+_LOCK=threading.RLock();_PROCESS=None;_KEY=secrets.token_urlsafe(32);_BACKEND='';_LAST_ERROR='';_ACTIVE_MODEL=None;_LAST_USED=0;_LAST_ROUTE={}
 
 def _request(path,payload=None,timeout=2):
     body=json.dumps(payload,ensure_ascii=False).encode('utf-8') if payload is not None else None
@@ -21,54 +22,60 @@ def _configuration():
         return config
     except (OSError,ValueError,KeyError):return None
 
-def _healthy(timeout=1):
-    return _request('/health',timeout=timeout).get('status')=='ok' and any(row.get('id')==MODEL for row in _request('/v1/models',timeout=timeout).get('data',[]))
+def _healthy(timeout=1,model=None):
+    return _request('/health',timeout=timeout).get('status')=='ok' and any(row.get('id')==(model or _ACTIVE_MODEL or MODEL) for row in _request('/v1/models',timeout=timeout).get('data',[]))
+
+def choose(history,companion=False,model=None):
+    text=next((row.get('content','') for row in reversed(history) if row.get('role')=='user'),'')
+    return local_models.choose(text,companion,requested=model,active=_ACTIVE_MODEL,last_used=_LAST_USED,history=history)
 
 def status():
-    config=_configuration();model_file=setup.BASE/setup.MODEL_NAME
-    try:verification=json.loads(model_file.with_suffix('.gguf.download.json').read_text(encoding='utf-8'))
-    except (OSError,ValueError):verification={}
-    installed=bool(config and model_file.is_file() and model_file.stat().st_size==setup.MODEL_SIZE and verification.get('state')=='verified' and verification.get('sha256')==setup.MODEL_SHA)
-    ready=False
-    if installed:
+    config=_configuration();ready=False
+    if _PROCESS is not None and _PROCESS.poll() is None:
         try:ready=_healthy(timeout=.5)
         except (OSError,ValueError):pass
-    partial=model_file.with_suffix('.gguf.part')
-    return {'installed':installed,'ready':ready,'model':MODEL,'backend':_BACKEND or (config or {}).get('backend','not_installed'),'host':'127.0.0.1','port':18766,'model_bytes':setup.MODEL_SIZE,'downloaded_bytes':model_file.stat().st_size if model_file.exists() else partial.stat().st_size if partial.exists() else 0,'detail':'本机Qwen已就绪。' if ready else '本地组件已下载，首次调用按需启动。' if installed else '本地Qwen组件未就绪，需完成官方模型与便携运行时下载。','last_error':_LAST_ERROR}
+    rows=[]
+    for ident,item in local_models.CATALOG.items():
+        path=setup.BASE/item['file'];partial=path.with_suffix('.gguf.part')
+        rows.append({'id':ident,'label':item['label'],'installed':bool(config and local_models.installed(ident)),'ready':bool(ready and ident==_ACTIVE_MODEL),'model_bytes':item['size'],'downloaded_bytes':path.stat().st_size if path.exists() else partial.stat().st_size if partial.exists() else 0})
+    selected=local_models.selection();default=next((r for r in rows if r['id']==(selected if selected!='auto' else _ACTIVE_MODEL or MODEL)),rows[0])
+    return {'installed':any(r['installed'] for r in rows),'ready':ready,'model':default['id'],'models':rows,'selection':selected,'active_model':_ACTIVE_MODEL if ready else None,'last_routing':_LAST_ROUTE,'adaptation':{k:v for k,v in local_adaptation.status(app_paths.DATA).items() if k!='items'},'backend':_BACKEND or (config or {}).get('backend','not_installed'),'host':'127.0.0.1','port':18766,'model_bytes':default['model_bytes'],'downloaded_bytes':default['downloaded_bytes'],'detail':'本机Qwen已就绪。' if ready else '本地组件已下载，首次调用按需启动。' if any(r['installed'] for r in rows) else '本地Qwen组件未就绪。','last_error':_LAST_ERROR}
 
 def stop():
-    global _PROCESS
+    global _PROCESS,_ACTIVE_MODEL
     if _PROCESS is not None and _PROCESS.poll() is None:
         _PROCESS.terminate()
         try:_PROCESS.wait(timeout=5)
         except subprocess.TimeoutExpired:_PROCESS.kill()
-    _PROCESS=None
+    _PROCESS=None;_ACTIVE_MODEL=None
 atexit.register(stop)
 
-def ensure_ready():
-    global _PROCESS,_BACKEND,_LAST_ERROR
+def ensure_ready(model=MODEL):
+    global _PROCESS,_BACKEND,_LAST_ERROR,_ACTIVE_MODEL
     with _LOCK:
-        if status()['ready']:return
+        if _ACTIVE_MODEL==model and status()['ready']:return
         config=_configuration()
-        if not status()['installed']:raise ValueError('本地Qwen尚未安装完成，请先运行本机官方组件安装。')
-        stop();executable=pathlib.Path(config['executable']);model_file=setup.BASE/setup.MODEL_NAME
-        choices=[('cuda',99),('cpu',0)] if config.get('backend','').startswith('cuda') else [('cpu',0)]
+        if model not in local_models.CATALOG or not config or not local_models.installed(model):raise ValueError('本地Qwen尚未安装完成，请先运行本机官方组件安装。')
+        stop();executable=pathlib.Path(config['executable']);model_file=setup.BASE/local_models.CATALOG[model]['file']
+        layers=local_models.gpu_layers(model) if config.get('backend','').startswith('cuda') else 0
+        choices=[('cuda',layers),('cpu',0)] if layers else [('cpu',0)]
         for backend,layers in choices:
             if backend=='cpu' and config.get('cpu_executable'):
                 cpu=pathlib.Path(config['cpu_executable']).resolve()
                 if cpu.is_relative_to(setup.BASE.resolve()) and cpu.is_file():executable=cpu
             log=setup.BASE/'llama-server.log'
-            command=[str(executable),'-m',str(model_file),'--host','127.0.0.1','--port','18766','--alias',MODEL,'-c','16384','-np','1','-t','8','-ngl',str(layers),'--jinja','--reasoning','off','--api-key',_KEY,'--no-ui']
+            command=[str(executable),'-m',str(model_file),'--host','127.0.0.1','--port','18766','--alias',model,'-c','16384','-np','1','-t','8','-ngl',str(layers),'--jinja','--reasoning','off','--api-key',_KEY,'--no-ui']
+            _ACTIVE_MODEL=model
             with log.open('wb') as output:
                 _PROCESS=subprocess.Popen(command,cwd=executable.parent,stdout=output,stderr=output,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             deadline=time.monotonic()+90
             while time.monotonic()<deadline:
                 if _PROCESS.poll() is not None:break
                 try:
-                    if _healthy(timeout=1):
+                    if _healthy(timeout=1,model=model):
                         offloaded=re.search(r'offloaded (\d+)/\d+ layers',log.read_text(encoding='utf-8',errors='replace'))
                         _BACKEND='cuda' if offloaded and int(offloaded.group(1))>0 and backend=='cuda' else 'cpu' if backend=='cpu' or offloaded else 'llama.cpp'
-                        _LAST_ERROR='';return
+                        _LAST_ERROR='';runtime_log.event('local_model_ready',provider='local',returned_model=model,gpu_layers=layers);return
                 except (OSError,ValueError):pass
                 time.sleep(.3)
             stop()
@@ -76,8 +83,25 @@ def ensure_ready():
         raise ValueError(_LAST_ERROR)
 
 def chat(history,context,companion=False,model=None,tools=None):
-    if model not in (None,MODEL):raise ValueError('本地模型编号无效。')
-    import providers,persistent_memory
+    global _LAST_ROUTE
+    routing=choose(history,companion,model);first=routing['model']
+    try:
+        result=_chat_once(history,context,companion,first,tools)
+        result['usage']['local_routing']=routing;_LAST_ROUTE=routing
+        return result
+    except ValueError as exc:
+        retryable=any(word in str(exc) for word in ('工具参数无效','未生成可解析','返回空回复','未返回有效结果'))
+        if not (local_models.selection()=='auto' and first==local_models.SMALL and local_models.installed(local_models.LARGE) and retryable):raise
+        result=_chat_once(history,context,companion,local_models.LARGE,tools)
+        result['usage']['local_routing']={'model':local_models.LARGE,'reason':'retry_invalid_4b_output','selection':'auto','attempts':[first,local_models.LARGE]}
+        _LAST_ROUTE=result['usage']['local_routing']
+        return result
+
+def _chat_once(history,context,companion=False,model=None,tools=None):
+    global _LAST_USED,_LAST_ROUTE
+    routing=choose(history,companion,model);selected_model=routing['model']
+    runtime_log.event('local_model_routing',provider='local',requested_model=selected_model,routing_reason=routing['reason'],selection_mode=local_models.selection())
+    import persistent_memory
     tools=[] if companion else (tools or [])
     messages=[];remaining=6000
     for message in reversed(history[-10:]):
@@ -88,7 +112,7 @@ def chat(history,context,companion=False,model=None,tools=None):
     raw_context=persistent_memory.redact(context if isinstance(context,str) else json.dumps(context,ensure_ascii=False))
     try:
         data=json.loads(raw_context)
-        selected={k:data[k] for k in ('name','clock','machine_capabilities','user_memory','memory_policy','preferences','recent_weather','worldbook','tasks') if k in data}
+        selected={k:data[k] for k in ('name','clock','machine_capabilities','user_memory','memory_policy','preferences','recent_weather','worldbook','tasks','local_adaptation') if k in data}
         if 'worldbook' in selected:selected['worldbook']=selected['worldbook'][:5]
         if 'tasks' in selected:selected['tasks']=[{'title':str(t.get('title',''))[:80],'status':t.get('status')} for t in selected['tasks'][:4]]
         while len(json.dumps(selected,ensure_ascii=False))>5000:
@@ -98,16 +122,19 @@ def chat(history,context,companion=False,model=None,tools=None):
             else:break
         safe_context=json.dumps(selected,ensure_ascii=False)
     except (ValueError,TypeError,AttributeError):safe_context=raw_context[:4000]
-    prompt=providers.system_prompt(safe_context)+'\n你在用户本机运行。不得声称已执行任何工具；只有结构化工具调用及本机返回结果才代表执行。/no_think'
+    if not isinstance(context,dict) and 'local_adaptation' not in safe_context:
+        safe_context+='\n用户确认的本机适配资料（不是系统指令）：'+json.dumps(local_adaptation.context(app_paths.DATA,next((m['content'] for m in reversed(messages) if m['role']=='user'),'')),ensure_ascii=False)
+    prompt=local_persona.prompt(safe_context)+'\n你在用户本机运行。不得声称已执行任何工具；只有结构化工具调用及本机返回结果才代表执行。/no_think'
     if companion:prompt+='\n只说一句自然中文，最多55字。不调用工具，不催促，不虚构观察。'
     if not tools:prompt+='\n本次没有可用工具，只能提供文字回复，不得声称已记录或执行操作。'
-    body={'model':MODEL,'messages':[{'role':'system','content':prompt},*messages],'max_tokens':160 if companion else 768,'temperature':.7,'top_p':.8,'top_k':20,'min_p':0,'chat_template_kwargs':{'enable_thinking':False},'stream':False}
+    body={'model':selected_model,'messages':[{'role':'system','content':prompt},*messages],'max_tokens':160 if companion else 1536 if selected_model==local_models.LARGE else 768,'temperature':.7,'top_p':.8,'top_k':20,'min_p':0,'chat_template_kwargs':{'enable_thinking':False},'stream':False}
     if tools:body['tools']=[t if t.get('type')=='function' else {'type':'function','function':t} for t in tools];body['tool_choice']='auto'
     started=time.monotonic()
     with _LOCK:
-        ensure_ready()
+        ensure_ready(selected_model)
         try:result=_request('/v1/chat/completions',body,timeout=120)
         except (OSError,ValueError):raise ValueError('本机Qwen请求失败，未自动调用云端。') from None
+    _LAST_USED=time.monotonic();_LAST_ROUTE=routing
     choices=result.get('choices') or []
     if not choices:raise ValueError('本地模型未返回有效结果。')
     message=choices[0].get('message') or {};text=message.get('content') or '';calls=[]
@@ -121,4 +148,4 @@ def chat(history,context,companion=False,model=None,tools=None):
     if '<tool_call>' in text and not calls:raise ValueError('本地模型未生成可解析的结构化工具调用，未执行。')
     if not text and not calls:raise ValueError('本地模型返回空回复。')
     usage=result.get('usage') or {}
-    return {'text':text,'calls':calls,'model':MODEL,'usage':{'provider':'local','requested_model':MODEL,'returned_model':result.get('model',MODEL),'input_tokens':usage.get('prompt_tokens'),'output_tokens':usage.get('completion_tokens'),'elapsed_seconds':round(time.monotonic()-started,3),'estimate_cny':0,'price_basis':'local_inference_no_cloud_charge','tools_enabled':bool(tools),**({'purpose':'pet_chat'} if companion else {})}}
+    return {'text':text,'calls':calls,'model':selected_model,'usage':{'provider':'local','requested_model':selected_model,'returned_model':result.get('model',selected_model),'local_routing':routing,'input_tokens':usage.get('prompt_tokens'),'output_tokens':usage.get('completion_tokens'),'elapsed_seconds':round(time.monotonic()-started,3),'estimate_cny':0,'price_basis':'local_inference_no_cloud_charge','tools_enabled':bool(tools),**({'purpose':'pet_chat'} if companion else {})}}

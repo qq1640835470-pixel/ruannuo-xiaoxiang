@@ -24,9 +24,13 @@
     const select = $(kind.model), provider = $(kind.provider)?.value;
     if (!select) return;
     const catalogue = catalogues.get(provider), selected = maps[kind.key][provider] || catalogue?.defaults?.[kind.name];
+    const local = provider === 'local';
+    select.hidden = local;
+    document.querySelector(`label[for="${kind.model}"]`)?.toggleAttribute('hidden', local);
+    if (kind.name === 'chat' && $('model-detail')) $('model-detail').hidden = local;
     select.replaceChildren();
-    if (provider === 'local') {
-      select.add(new Option('本机 Qwen／本地工具', '')); select.disabled = true; return;
+    if (local) {
+      select.disabled = true; return;
     }
     select.disabled = false;
     const rows = catalogue?.models || [];
@@ -38,6 +42,9 @@
   function status() {
     const target = $('catalog-status'); if (!target) return;
     const providers = [...new Set(kinds.map(kind => $(kind.provider)?.value).filter(p => p && p !== 'local'))];
+    target.hidden = !providers.length;
+    if ($('catalog-refresh')) $('catalog-refresh').hidden = !providers.length;
+    if (!providers.length) { target.textContent = ''; return; }
     target.textContent = providers.map(provider => {
       const c = catalogues.get(provider);
       if (!c || c.status === 'not_fetched') return `${provider}：尚未读取，点击读取型号列表`;

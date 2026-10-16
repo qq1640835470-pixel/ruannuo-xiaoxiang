@@ -2,14 +2,14 @@
 from __future__ import annotations
 import app_paths
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
-import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes
+import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes, local_models, local_adaptation
 import connectors, providers, feedback_bridge, runtime_log, local_features, web_tools, music_service, companion_knowledge, persistent_memory, model_routing, typed_tools
 
 ROOT=pathlib.Path(__file__).resolve().parent
 DATA=app_paths.DATA
 DB=DATA/'assistant.sqlite3'
 PORT=18764
-VERSION='0.3.1'
+VERSION='0.3.2'
 BUILD_ID=hashlib.sha256(b''.join(p.read_bytes() for p in sorted([*ROOT.glob('*.py'),*ROOT.joinpath('web').glob('*.js'),*ROOT.joinpath('web').glob('*.css'),ROOT/'web'/'index.html']))).hexdigest()[:12]
 LOCK=threading.RLock()
 CHAT_LOCK=threading.Lock()
@@ -85,7 +85,7 @@ def configure_local(body):
     raise ValueError('不支持这项本地自我调整。')
 def settings():
     with connect() as c:s={r['key']:json.loads(r['value']) for r in c.execute('SELECT * FROM settings')}
-    s['model']=(local_runtime.MODEL if local_runtime.status()['installed'] else '本地规则') if s['provider']=='local' else s.get('chat_models',providers.MODELS).get(s['provider'],'本地规则');s['pet_model']=s.get('pet_models',providers.PET_MODELS).get(s['pet_provider'],providers.PET_MODELS.get(s['pet_provider']));s['budget']=budget();s['local_preferences']=local_preferences();return s
+    s['model']=((local_models.selection() if local_models.selection()!='auto' else '自动选择 4B / 8B') if local_runtime.status()['installed'] else '本地规则') if s['provider']=='local' else s.get('chat_models',providers.MODELS).get(s['provider'],'本地规则');s['pet_model']=s.get('pet_models',providers.PET_MODELS).get(s['pet_provider'],providers.PET_MODELS.get(s['pet_provider']));s['budget']=budget();s['local_preferences']=local_preferences();return s
 def budget():
     with connect() as c:
         row=c.execute('SELECT COALESCE(SUM(estimate_cny),0),COALESCE(SUM(reserved_cny),0),COUNT(*) FROM usage').fetchone()
@@ -120,6 +120,9 @@ def add_message(role,text,actions=None,provider=None,model=None,execution=None):
         c.execute('INSERT INTO messages(id,role,content,created_at,actions,provider,model,execution) VALUES(?,?,?,?,?,?,?,?)',
             (mid,role,text,now(),json.dumps(actions or [],ensure_ascii=False),provider,model,json.dumps(execution or [],ensure_ascii=False)))
         if role=='user':persistent_memory.observe(c,text,mid,now())
+    if role=='user':
+        try:local_adaptation.observe(DATA,text,mid)
+        except (OSError,ValueError) as exc:runtime_log.error('local_adaptation_save_failed',exc)
     return mid
 
 def memory_state(query=''):
@@ -314,8 +317,8 @@ def local_chat(text):
         app=names.get(alias[2],alias[2])
         update_memory({'operation':'learn_alias','alias':alias[1],'app':app})
         return {'reply':'程序别名已经记住，可以用“打开'+alias[1]+'”调用。','actions':[]}
-    destination=re.fullmatch(r'(?:请|帮我)?(?:我想(?:要)?去|我要去|带我去|导航(?:到|去)|去往|查找)\s*(.{1,120}?)(?:的位置|位置)?[。！!]?$',text)
-    if destination and not re.search(r'[？?]|(?:怎么样|可以吗|好吗|是否|不要|别去|如果|比如|例如)',text):
+    destination=re.fullmatch(r'(?:请|帮我)?(?:查查|查一下|看看)?(?:我想(?:要)?去|我要去|带我去|怎么去|如何去|导航(?:到|去)|去往|查找)\s*(.{1,120}?)(?:的位置|位置)?[。！!？?]?$',text)
+    if destination and not re.search(r'(?:怎么样|可以吗|好吗|是否|不要|别去|如果|比如|例如)',text):
         if text.startswith(('查找','请查找','帮我查找')):return map_workspace(destination[1].strip())
         route_status=maps_routes.status(DATA)
         return {'reply':'想去'+destination[1].strip()+'呀。你从哪里出发，打算步行还是坐公交地铁？'+('路线连接还需要在设置里完成一次配置，之后就能直接查询具体步骤。' if not route_status.get('configured') else ''),'actions':[]}
@@ -380,6 +383,9 @@ def web_reply(result,tomorrow=False):
         return friendly('weather')+f"\n{label}，{'明天' if tomorrow else '今天'}：\n"+now_text+forecast+'\n来源：Open-Meteo · 查询于 '+str(result.get('queried_at',''))
     return '\n\n'.join(f"{i+1}. {r['title']}\n{r['snippet']}\n{r['url']}" for i,r in enumerate(result.get('results',[])))+'\n查询时间：'+str(result.get('queried_at',''))
 def consume_model_result(r,text,source_id,provider,route):
+    if provider=='local' and r.get('model'):
+        route={**route,'model':r['model']}
+        if r.get('usage',{}).get('local_routing',{}).get('reason')=='retry_invalid_4b_output':route.update(r['usage']['local_routing'])
     replies=[];actions=[];execution=[];captured=[];workspace=None;music=None
     for call in r['calls']:
         try:
@@ -413,7 +419,10 @@ def chat(text):
         else:
             s=settings();route=model_routing.choose(text,s);provider=route['provider']
             local_model=(provider=='local' or not s['api_generation_enabled']) and local_runtime.status()['installed'] and not (text.startswith(('反馈','体验反馈')) and not s['api_generation_enabled'])
-            if local_model:provider='local';route={'provider':'local','model':local_runtime.MODEL,'reason':'local_runtime','difficulty':'local'}
+            if local_model:
+                provider='local'
+                with connect() as c:local_history=[dict(row) for row in c.execute('SELECT role,content FROM (SELECT rowid,role,content FROM messages ORDER BY rowid DESC LIMIT 10) ORDER BY rowid')]
+                route={'provider':'local',**local_runtime.choose(local_history)}
             if (provider=='local' and not local_model) or (not s['api_generation_enabled'] and not local_model) or (text.startswith(('反馈','体验反馈')) and (budget()['remaining_cny'] is not None and budget()['remaining_cny']<.5)):
                 if text.startswith(('反馈','体验反馈')):
                     draft=capture_ai_feedback({'title':'待整理的反馈','summary':text},text,source_id,'local','原文，尚未完成AI总结')
@@ -424,7 +433,7 @@ def chat(text):
                 known_usage=None
                 try:
                     with connect() as c:history=[dict(r) for r in c.execute('SELECT role,content FROM (SELECT rowid,role,content FROM messages ORDER BY rowid DESC LIMIT 10) ORDER BY rowid')]
-                    r=providers.chat(provider,history,context(),model=selected);known_usage=r['usage'];settle(uid,known_usage)
+                    r=providers.chat(provider,history,context(),model=None if provider=='local' and local_models.selection()=='auto' else selected);known_usage=r['usage'];settle(uid,known_usage)
                     result=consume_model_result(r,text,source_id,provider,route)
                 except Exception as e:
                     runtime_log.error('model_failed' if known_usage is None else 'chat_processing_failed',e,provider=provider)
@@ -436,10 +445,10 @@ def chat(text):
                             'actions':[],'provider':provider,'model':selected,'requested_model':selected,'error':True,'diagnostic':diagnostic,'routing':route}
                     if provider!='local' and s.get('local_fallback_enabled') and known_usage is None and local_runtime.status()['installed'] and (code in (401,402,408,429,500,502,503,504) or isinstance(e,(TimeoutError,urllib.error.URLError))):
                         try:
-                            local_uid=reserve('local',local_runtime.MODEL)
                             with connect() as c:local_history=[dict(row) for row in c.execute('SELECT role,content FROM (SELECT rowid,role,content FROM messages ORDER BY rowid DESC LIMIT 10) ORDER BY rowid')]
-                            local_result=providers.chat('local',local_history,context(),model=local_runtime.MODEL);settle(local_uid,local_result['usage'])
-                            result=consume_model_result(local_result,text,source_id,'local',{'reason':'cloud_unavailable_local_fallback','provider':'local','model':local_runtime.MODEL})
+                            local_route=local_runtime.choose(local_history);local_uid=reserve('local',local_route['model'])
+                            local_result=providers.chat('local',local_history,context(),model=None if local_models.selection()=='auto' else local_route['model']);settle(local_uid,local_result['usage'])
+                            result=consume_model_result(local_result,text,source_id,'local',{'provider':'local',**local_route,'fallback_reason':'cloud_unavailable'})
                             result.setdefault('execution',[]).append({'title':'本机接管','status':'completed','result':'云端未取得回复，本次由本机Qwen处理；原云端用量未知记录保留。'})
                         except Exception as local_error:runtime_log.error('local_fallback_failed',local_error,provider='local')
                     if text.startswith(('反馈','体验反馈')):
@@ -563,15 +572,16 @@ def pet_chat(body):
         if sum(0<=age<86400 for age in ages)>=24:return {'skipped':'daily_limit'}
         provider=s['pet_provider'];selected=s['pet_models'].get(provider,providers.PET_MODELS[provider])
         if trigger=='idle' and providers.model_rates(provider,selected) is None:
-            if s.get('local_fallback_enabled') and local_runtime.status()['installed']:provider='local';selected=local_runtime.MODEL
+            if s.get('local_fallback_enabled') and local_runtime.status()['installed']:provider='local';selected=local_runtime.choose(history,companion=True)['model']
             else:return {'skipped':'unknown_price','detail':'当前闲聊型号价格未知，自动闲聊已暂停。可选择本机Qwen或有已核对保护估算的型号。'}
+        if provider=='local':selected=local_runtime.choose(history,companion=True)['model']
         uid=reserve(provider,selected)
         with connect() as c:c.execute('UPDATE usage SET metadata=? WHERE id=?',(json.dumps({'purpose':'pet_chat','trigger':trigger}),uid))
         pose_label={'stand':'站着','sit':'坐在边缘','hang':'双手挂在边缘','peek':'探头','held':'被轻轻拎起'}[pose]
         history=[{'role':m['role'],'content':m['content'][:400]} for m in history]
         history.append({'role':'user','content':f'当前小祥姿势：{pose_label}。'+('我点了聊一句，请陪我说句话。' if trigger=='manual' else '这是界面内偶尔闲聊的机会。')+'不要重复最近气泡：'+ '；'.join(m['content'][:80] for m in memories)})
         try:
-            r=providers.chat(provider,history,'xy喜欢电子硬件、华语情歌、吉他、二次元。喜欢具体温和的交流。未获得当前活动信息。当前本机时间：'+json.dumps(time_context(),ensure_ascii=False)+'。已核实的近期天气：'+json.dumps(location_service.recent(DATA) or web_tools.recent_weather(),ensure_ascii=False)+'；角色资料：'+json.dumps(companion_knowledge.select('祥子 音乐 舞台 日常'),ensure_ascii=False)+'；没有成功查询时不谈具体天气。根据时段自然调整问候与闲聊，不以时间推断困倦、活动，不定时催促。',companion=True,model=selected)
+            r=providers.chat(provider,history,'xy喜欢电子硬件、华语情歌、吉他、二次元。喜欢具体温和的交流。未获得当前活动信息。当前本机时间：'+json.dumps(time_context(),ensure_ascii=False)+'。已核实的近期天气：'+json.dumps(location_service.recent(DATA) or web_tools.recent_weather(),ensure_ascii=False)+'；角色资料：'+json.dumps(companion_knowledge.select('祥子 音乐 舞台 日常'),ensure_ascii=False)+'；没有成功查询时不谈具体天气。根据时段自然调整问候与闲聊，不以时间推断困倦、活动，不定时催促。',companion=True,model=None if provider=='local' and local_models.selection()=='auto' else selected)
             usage={**r['usage'],'purpose':'pet_chat','trigger':trigger}
             content=re.sub(r'[*#`]','',r['text']).strip()[:120]
             if not content:raise ValueError('空气泡')
@@ -630,6 +640,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p=='/api/diagnostics':return self.send(200,{'version':VERSION,'events':runtime_log.recent(100)})
             if p=='/api/routes/status':return self.send(200,maps_routes.status(DATA))
             if p=='/api/local/model':return self.send(200,local_runtime.status())
+            if p=='/api/local/adaptation':return self.send(200,local_adaptation.status(DATA))
             if p=='/api/local/status':return self.send(200,{**local_features.local_status(DATA),'preferences':local_preferences()})
             if p=='/api/location/status':return self.send(200,location_service.status(DATA))
             if p=='/api/location/weather':return self.send(200,location_service.weather(DATA))
@@ -703,9 +714,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='POST' and p=='/api/local/preferences':return self.send(200,update_local_preferences(b))
             if method=='POST' and p=='/api/local/maintenance':return self.send(200,configure_local(b))
             if method=='POST' and p=='/api/local/model/control':
-                if b.get('operation')!='stop':raise ValueError('仅支持释放本机模型。')
+                if b.get('operation')=='select':
+                    local_models.select(b.get('model'));return self.send(200,local_runtime.status())
+                if b.get('operation')!='stop':raise ValueError('仅支持选择或释放本机模型。')
                 if CHAT_LOCK.locked() or PET_LOCK.locked():raise ValueError('回复正在生成，请完成后再释放模型。')
                 local_runtime.stop();return self.send(200,local_runtime.status())
+            if method=='POST' and p=='/api/local/adaptation/teach':return self.send(200,local_adaptation.teach(DATA,b))
+            if method=='PATCH' and p=='/api/local/adaptation':return self.send(200,local_adaptation.configure(DATA,b))
+            if method=='DELETE' and p.startswith('/api/local/adaptation/'):
+                return self.send(200,local_adaptation.delete(DATA,p.rsplit('/',1)[-1]))
             if method=='POST' and p=='/api/routes/settings':return self.send(200,maps_routes.configure(b,DATA))
             if method=='POST' and p=='/api/routes/plan':return self.send(200,maps_routes.plan(b.get('origin'),b.get('destination'),b.get('mode','transit'),b.get('provider'),DATA))
             if method=='POST' and p=='/api/location/update':return self.send(200,location_service.update(b,DATA))

@@ -45,6 +45,50 @@ def download(url,destination,size,digest):
     if sha256(partial)!=digest:raise ValueError('SHA256校验失败，未启用文件。')
     partial.replace(destination);record.write_text(json.dumps({'source':url,'size':size,'sha256':digest,'state':'verified'}),encoding='utf-8');return destination
 
+def download_parallel(url,destination,size,digest):
+    import concurrent.futures
+    destination=pathlib.Path(destination);partial=destination.with_suffix(destination.suffix+'.part')
+    if destination.is_file():return download(url,destination,size,digest)
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    start=partial.stat().st_size if partial.exists() else 0
+    if start>size:raise ValueError('下载残片超过官方长度。')
+    directory=destination.with_suffix('.chunks');directory.mkdir(exist_ok=True)
+    ranges=[(offset,min(size,offset+256*1024*1024)) for offset in range(start,size,256*1024*1024)]
+    def segment(bounds):
+        first,end=bounds;path=directory/str(first)
+        for attempt in range(6):
+            offset=first+(path.stat().st_size if path.exists() else 0)
+            if offset==end:return path
+            if offset>end:raise ValueError('下载分段长度无效。')
+            try:
+                headers={**HEADERS,'Range':f'bytes={offset}-{end-1}'}
+                with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=30) as response:
+                    if response.status!=206 or not response.headers.get('Content-Range','').startswith(f'bytes {offset}-{end-1}/'):raise ValueError('下载源没有确认分段范围。')
+                    with path.open('ab') as stream:
+                        remaining=end-offset
+                        while remaining:
+                            block=response.read(min(1024*1024,remaining))
+                            if not block:break
+                            stream.write(block);remaining-=len(block)
+            except (OSError,TimeoutError):
+                if attempt==5:raise
+        if not path.exists() or path.stat().st_size!=end-first:raise ValueError('分段未完成，已保留以便续传。')
+        return path
+    completed=start
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        for future in concurrent.futures.as_completed([pool.submit(segment,bounds) for bounds in ranges]):
+            path=future.result();completed+=path.stat().st_size
+            print(json.dumps({'file':destination.name,'downloaded':completed,'size':size,'mode':'parallel_resume'}),flush=True)
+    with partial.open('ab') as output:
+        for first,end in ranges:
+            with (directory/str(first)).open('rb') as stream:shutil.copyfileobj(stream,output,4*1024*1024)
+    if partial.stat().st_size!=size or sha256(partial)!=digest:raise ValueError('官方文件校验失败，未启用。')
+    partial.replace(destination)
+    destination.with_suffix(destination.suffix+'.download.json').write_text(json.dumps({'source':url,'size':size,'sha256':digest,'state':'verified'}),encoding='utf-8')
+    for first,end in ranges:(directory/str(first)).unlink()
+    if not any(directory.iterdir()):directory.rmdir()
+    return destination
+
 def detected_cuda():
     executable=shutil.which('nvidia-smi')
     if not executable:return None
@@ -90,13 +134,17 @@ def install_runtime():
     (BASE/'runtime.json').write_text(json.dumps({'version':tag,'executable':str(executable),'backend':'cuda' if any('cuda' in a['name'] for a in assets) else 'cpu','cpu_executable':str(cpu) if cpu else '', 'verified':True}),encoding='utf-8')
     return executable
 
-def install_model():return download(MODEL_URL,BASE/MODEL_NAME,MODEL_SIZE,MODEL_SHA)
+def install_model(model='4b'):
+    if model=='4b':return download(MODEL_URL,BASE/MODEL_NAME,MODEL_SIZE,MODEL_SHA)
+    if model!='8b':raise ValueError('仅支持4b或8b。')
+    item=json.loads((pathlib.Path(__file__).parent/'assets/qwen8b-official.json').read_text(encoding='utf-8'))
+    return download_parallel('https://huggingface.co/'+item['repo']+'/resolve/'+item['revision']+'/'+item['file'],BASE/item['file'],item['size'],item['sha256'])
 
 if __name__=='__main__':
     import argparse
-    parser=argparse.ArgumentParser();parser.add_argument('--model-only',action='store_true');parser.add_argument('--runtime-only',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--model-only',action='store_true');parser.add_argument('--runtime-only',action='store_true');parser.add_argument('--model',choices=('4b','8b'),default='4b');args=parser.parse_args()
     try:
-        if not args.runtime_only:install_model()
+        if not args.runtime_only:install_model(args.model)
         if not args.model_only:install_runtime()
         (BASE/'setup-progress.json').write_text(json.dumps({'state':'complete' if not (args.runtime_only or args.model_only) else 'selected_step_complete'}),encoding='utf-8')
         print('Verified local setup complete.',flush=True)

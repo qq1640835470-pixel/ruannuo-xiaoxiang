@@ -8,7 +8,7 @@ class DownloadTests(unittest.TestCase):
         owner=self
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                value=self.headers.get('Range');owner.requests.append(value);offset=int(value[6:-1]) if value else 0
+                value=self.headers.get('Range');owner.requests.append(value);offset=int(value[6:].split('-')[0]) if value else 0
                 self.send_response(206 if value else 200)
                 if value:self.send_header('Content-Range',f'bytes {offset}-{len(owner.content)-1}/{len(owner.content)}')
                 self.end_headers();self.wfile.write(owner.content[offset:])
@@ -24,6 +24,11 @@ class DownloadTests(unittest.TestCase):
     def test_mismatched_hash_never_installs(self):
         with self.assertRaises(ValueError):setup.download(self.url,self.file,len(self.content),'0'*64)
         self.assertFalse(self.file.exists());self.assertTrue(self.file.with_suffix('.gguf.part').exists())
+    def test_parallel_resume_keeps_prefix_and_checks_final_hash(self):
+        self.file.with_suffix('.gguf.part').write_bytes(self.content[:5])
+        setup.download_parallel(self.url,self.file,len(self.content),self.digest)
+        self.assertEqual(self.file.read_bytes(),self.content)
+        self.assertEqual(json.loads(self.file.with_suffix('.gguf.download.json').read_text())['state'],'verified')
     def test_rejects_zip_path_escape(self):
         import zipfile
         archive=pathlib.Path(self.temp.name)/'runtime.zip'
