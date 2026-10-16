@@ -93,9 +93,9 @@ class CoreRuntimeTests(unittest.TestCase):
         self.assertEqual(sum(x['enabled'] for x in providers.adapter_catalogue()['providers']),2)
 
     def test_unknown_price_autonomous_pet_stays_free(self):
-        with patch('providers.chat',side_effect=AssertionError('No model')):
+        with patch('providers.chat',side_effect=AssertionError('No model')),patch('local_runtime.status',return_value={'installed':False}):
             result=server.pet_chat({'trigger':'idle'})
-        self.assertEqual(result['skipped'],'unknown_price');self.assertEqual(server.budget()['requests'],0)
+        self.assertEqual(result['skipped'],'free_only');self.assertEqual(server.budget()['requests'],0)
         self.assertIsNone(providers.model_rates('gemini','gemini-3.7-flash'))
 
     def test_manual_budget_limit_and_settings_validation(self):

@@ -1,0 +1,4 @@
+html[data-pet-cursor="xiaoxiang"],html[data-pet-cursor="xiaoxiang"] body{cursor:url('/assets/pet/xiaoxiang-cursor.svg') 2 2,auto}
+html[data-pet-cursor="xiaoxiang"] :is(button,a,summary,select,[role=button],input[type=checkbox],input[type=radio],input[type=range]){cursor:url('/assets/pet/xiaoxiang-cursor-link.svg') 2 2,pointer}
+html[data-pet-cursor="xiaoxiang"] :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),textarea,[contenteditable=true]){cursor:text}
+html[data-pet-cursor="xiaoxiang"] #pet-canvas{cursor:grab}html[data-pet-cursor="xiaoxiang"] #pet-canvas:active{cursor:grabbing}html[data-pet-cursor="xiaoxiang"] button:disabled{cursor:wait}

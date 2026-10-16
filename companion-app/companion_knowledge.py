@@ -7,7 +7,9 @@ def load():
 
 def select(text,limit=1800):
     selected=[];remaining=limit
-    for entry in load()['entries']:
+    # Relevant interests must survive the local model's short lore context.
+    entries=sorted(load()['entries'],key=lambda entry:entry.get('priority',0),reverse=True)
+    for entry in entries:
         if not entry.get('always') and not any(k in text for k in entry['keywords']):continue
         content=entry['content'][:remaining]
         if not content:break
@@ -23,4 +25,4 @@ def library(clock,weather=None,task_count=0):
         if '雨' in summary:lines+=['刚查到的天气预报里有雨。出门前可以再看一眼，伞带上会稳妥些。','预报里提到了雨，和我听一首歌也不错。']
         elif current.get('temperature_2m',0)>=30:lines+=['刚查到的预报温度有点高。要出门的话，记得带点水。']
     if task_count:lines+=['计划栏里有你记下的事情，想整理时叫我就好。']
-    return {'lines':lines,'phase':phase,'worldbook_entries':len(data['entries']),'weather_attached':bool(weather),'source':'本机原创候选，不标作角色原作台词','limits':'角色条目不提供实时事实或工具权限；未启用持续监测或催促。'}
+    return {'lines':lines,'phase':phase,'worldbook_entries':len(data['entries']),'weather_attached':bool(weather),'source':'本机原创候选，不标作角色原作台词','limits':'角色条目不提供实时事实或工具权限；前台程序时长监测单独授权，不代表能读窗口内容；未启用催促。'}

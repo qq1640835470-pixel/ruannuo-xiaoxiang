@@ -1,19 +1,35 @@
 "use strict";
 (() => {
   const $=s=>document.querySelector(s);
+  const dialog=$('#workspace-dialog'), heading=$('#workspace-heading');
+  const home=document.createElement('div');home.id='workspace-home';
+  const musicPage=document.createElement('div');musicPage.id='workspace-music';musicPage.hidden=true;
+  const musicSection=$('#music-audio').closest('section');
+  const back=document.createElement('button');back.type='button';back.className='subtle-button workspace-back';back.textContent='‹ 返回工具';
+  const musicEntry=document.createElement('button');musicEntry.type='button';musicEntry.className='workspace-music-entry';musicEntry.textContent='♫ 音乐 · 网易云 / 本地音乐';
+  for(const section of Array.from(dialog.querySelectorAll(':scope > section')))if(section!==musicSection)home.append(section);
+  home.append(musicEntry);musicPage.append(back,musicSection);dialog.append(home,musicPage);
+  function showPage(page){const music=page==='music';home.hidden=music;musicPage.hidden=!music;heading.textContent=music?'音乐':'工具';if(!dialog.open)dialog.showModal();window.dispatchEvent(new CustomEvent('xy:workspace-page',{detail:{page:music?'music':'home'}}));if(music)$('#music-search')?.focus();else musicEntry.focus();}
+  musicEntry.addEventListener('click',()=>showPage('music'));back.addEventListener('click',()=>showPage('home'));
+  window.XYWorkspace={open:showPage};
   async function call(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const d=await r.json();if(!r.ok)throw new Error(d.error||'本机处理失败');return d;}
   function preferences(p={}){document.documentElement.style.setProperty('--reading-scale',p.font_scale||1);document.documentElement.dataset.density=p.density||'comfortable';document.documentElement.dataset.motion=p.motion||'normal';$('#local-font').value=p.font_scale||1;$('#local-density').value=p.density||'comfortable';$('#local-motion').value=p.motion||'normal';window.dispatchEvent(new CustomEvent('xy:local-preferences',{detail:p}));}
   window.XYLocal={apply:preferences};
   async function load(){try{const data=await call('/api/local/status');preferences(data.preferences);$('#local-capabilities').replaceChildren(...data.permissions.map(p=>{const li=document.createElement('li');li.textContent=`${p.name}：${p.scope}${p.enabled?'':'（关闭）'}`;return li;}));}catch(e){$('#local-status').textContent=e.message;}}
   $('#local-save').addEventListener('click',async()=>{try{const d=await call('/api/local/preferences',{font_scale:Number($('#local-font').value),density:$('#local-density').value,motion:$('#local-motion').value});preferences(d.preferences);$('#local-status').textContent='已保存，下次打开也会保留。';}catch(e){$('#local-status').textContent=e.message;}});
   $('#local-health').addEventListener('click',async()=>{try{const d=await call('/api/local/maintenance',{operation:'health'});$('#local-status').textContent=Object.entries(d.checks).map(([k,v])=>`${{web_assets:'界面文件',data_directory:'本机数据',browser_component:'浏览器组件'}[k]||k}：${v?'正常':'需检查'}`).join('；');}catch(e){$('#local-status').textContent=e.message;}});
-  $('#workspace-open').addEventListener('click',()=>$('#workspace-dialog').showModal());
+  $('#workspace-open').addEventListener('click',()=>showPage('home'));
   $('#workspace-close').addEventListener('click',()=>$('#workspace-dialog').close());
   let browserTimer;
   $('#browser-form').addEventListener('submit',async e=>{e.preventDefault();const b=$('#browser-go'),status=$('#browser-status');b.disabled=true;clearTimeout(browserTimer);try{const d=await call('/api/browser/open',{url:$('#browser-url').value});status.textContent=d.detail;$('#workspace-dialog').close();let checks=0;async function poll(){try{const s=await call('/api/browser/status?id='+encodeURIComponent(d.id));status.textContent=s.detail;if(['failed','loaded','closed'].includes(s.status)||++checks>=20){b.disabled=false;return;}browserTimer=setTimeout(poll,1000);}catch(e){status.textContent=e.message;b.disabled=false;}}browserTimer=setTimeout(poll,800);}catch(e){status.textContent=e.message;b.disabled=false;}});
   let tracks=[],active=-1,playRevision=0;const audio=$('#music-audio'),list=$('#music-list'),status=$('#music-status');
   function label(track){return track.name+(track.artists?' — '+track.artists:'');}
-  function publish(){const t=tracks[active];window.dispatchEvent(new CustomEvent('xy:music-state',{detail:{playing:!!t&&!audio.paused&&!audio.ended,title:t?.name||'',artist:t?.artists||''}}));}
+  const commentary=document.createElement('button');commentary.type='button';commentary.className='subtle-button';commentary.textContent='聊聊这首歌';commentary.disabled=true;
+  const commentResult=document.createElement('p');commentResult.className='music-commentary';commentResult.setAttribute('role','status');
+  status.after(commentary,commentResult);
+  let commentBusy=false;
+  commentary.addEventListener('click',async()=>{const track=tracks[active];if(!track||commentBusy)return;commentBusy=true;commentary.disabled=true;commentResult.textContent='正在聊这首歌…';try{const d=await call('/api/music/commentary',{title:track.name,artist:track.artists||''});window.dispatchEvent(new CustomEvent('xy:music-commentary',{detail:d}));commentResult.textContent=d.text||'暂时没有评论。';}catch(e){commentResult.textContent='评论暂未完成：'+e.message;}finally{commentBusy=false;commentary.disabled=!tracks[active];}});
+  function publish(){const t=tracks[active];commentary.disabled=commentBusy||!t;window.dispatchEvent(new CustomEvent('xy:music-state',{detail:{playing:!!t&&!audio.paused&&!audio.ended,title:t?.name||'',artist:t?.artists||''}}));}
   function render(){list.replaceChildren(...tracks.map((track,index)=>{const b=document.createElement('button');b.type='button';b.className='music-track'+(active===index?' selected':'');b.textContent=label(track);b.addEventListener('click',()=>play(index));return b;}));}
   async function play(index){if(!tracks.length)return;const revision=++playRevision;audio.pause();active=(index+tracks.length)%tracks.length;const track=tracks[active];audio.removeAttribute('src');audio.load();render();publish();status.textContent=label(track);try{let url=track.url;if(track.remote){const d=await call('/api/music/url?id='+encodeURIComponent(track.id));if(revision!==playRevision)return;if(!d.available){status.textContent=d.detail;return;}url=d.url;status.textContent=label(track)+(d.trial?'（试听片段）':'');}if(revision!==playRevision)return;audio.src=url;await audio.play();}catch(e){if(revision===playRevision){status.textContent=track.remote?'音乐未能播放：'+e.message:'已选中 '+track.name+'，请点播放。';publish();}}}
   function clear(){++playRevision;audio.pause();audio.removeAttribute('src');audio.load();for(const t of tracks)if(t.url?.startsWith('blob:'))URL.revokeObjectURL(t.url);tracks=[];active=-1;publish();}

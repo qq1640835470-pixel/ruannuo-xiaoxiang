@@ -15,9 +15,18 @@
     const triggered=times.length>=11&&time-(state.lastTriggered??-Infinity)>=15000;
     return {times:triggered?[]:times,lastTriggered:triggered?time:state.lastTriggered,triggered};
   }
-  function activity(hour,playing,choice='auto'){
+  function activity(hour,playing,choice='auto',context={}){
     if(choice!=='auto')return choice;
-    return playing?'music':hour>=11&&hour<14?'lunch':hour>=22||hour<6?'sleepy':'idle';
+    if(playing)return 'music';
+    if(['happy','surprised','sleepy','lunch'].includes(context.activity))return context.activity;
+    return 'idle';
+  }
+  function reaction(value,elapsed){
+    const t=Math.max(0,elapsed)/1000;
+    if(t>2.4)return {bob:0,lean:0};
+    const decay=Math.exp(-t*2.4);
+    return value==='happy'?{bob:-Math.abs(Math.sin(t*7))*7*decay,lean:Math.sin(t*6)*.018*decay}:
+      value==='surprised'?{bob:-Math.sin(Math.min(1,t/.5)*Math.PI)*8*decay,lean:-.018*decay}:{bob:0,lean:0};
   }
   function containSprite(matrix,rect,width,height,padding=6){
     const corners=[[rect.x,rect.y],[rect.x+rect.width,rect.y],[rect.x,rect.y+rect.height],[rect.x+rect.width,rect.y+rect.height]].map(([x,y])=>({x:matrix.a*x+matrix.c*y+matrix.e,y:matrix.b*x+matrix.d*y+matrix.f}));
@@ -44,6 +53,6 @@
     }
     return null;
   }
-  const api={clamp,smooth,ease,mix,travel,blend,pat,greet,eyelid,containSprite,idle,sidebarPosition,recordPat,activity};
+  const api={clamp,smooth,ease,mix,travel,blend,pat,greet,eyelid,containSprite,idle,sidebarPosition,recordPat,activity,reaction};
   if(typeof module!=="undefined"&&module.exports)module.exports=api;else host.XYPetMotion=api;
 })(typeof window==="undefined"?globalThis:window);

@@ -8,6 +8,10 @@ class Node {
   click(){this.emit('click');}
   focus(){this.focused=true;}
   showModal(){this.open=true;}
+  close(){this.open=false;}
+  closest(){return select('#fixture-music-section');}
+  querySelectorAll(){return [];}
+  after(){}
   append(...items){this.children.push(...items);}
   replaceChildren(...items){this.children=items;}
   setAttribute(k,v){this.attrs[k]=v;}
@@ -18,7 +22,7 @@ class Node {
   load(){this.emit('emptied');}
 }
 const select=s=>{if(!nodes.has(s))nodes.set(s,new Node());return nodes.get(s);};
-const context=vm.createContext({console,document:{querySelector:select,createElement:()=>new Node(),documentElement:{style:{setProperty(){}},dataset:{}}},window:{addEventListener:(name,fn)=>{(listeners[name]??=[]).push(fn);},dispatchEvent:e=>{events.push(e);for(const fn of listeners[e.type]||[])fn(e);}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},setTimeout,clearTimeout,URL:{createObjectURL:f=>'blob:'+f.name,revokeObjectURL:url=>revoked.push(url)},fetch:async path=>{calls.push(path);return {ok:true,json:async()=>path.includes('/url?')?{available:true,url:'https://m10.music.126.net/fixture.mp3'}:{preferences:{},permissions:[]}};}});
+const context=vm.createContext({console,localStorage:{getItem:()=>null,setItem(){}},document:{querySelector:select,querySelectorAll:()=>[],createElement:()=>new Node(),createTextNode:text=>text,documentElement:{style:{setProperty(){}},dataset:{}}},window:{addEventListener:(name,fn)=>{(listeners[name]??=[]).push(fn);},dispatchEvent:e=>{events.push(e);for(const fn of listeners[e.type]||[])fn(e);}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},setTimeout,clearTimeout,URL:{createObjectURL:f=>'blob:'+f.name,revokeObjectURL:url=>revoked.push(url)},fetch:async path=>{calls.push(path);return {ok:true,json:async()=>path.includes('/url?')?{available:true,url:'https://m10.music.126.net/fixture.mp3'}:{preferences:{},permissions:[]}};}});
 vm.runInContext(fs.readFileSync('web/workspace-tools.js','utf8'),context);
 const dispatch=(type,detail)=>{for(const fn of listeners[type]||[])fn({detail});};const flush=()=>new Promise(r=>setImmediate(r));const latest=()=>events.filter(e=>e.type==='xy:music-state').at(-1).detail;
 (async()=>{
@@ -35,11 +39,11 @@ const dispatch=(type,detail)=>{for(const fn of listeners[type]||[])fn({detail});
   context.setTimeout=()=>1;context.clearTimeout=()=>{};
   vm.runInContext(fs.readFileSync('web/music-pet.js','utf8'),context);
   const bubble=context.document.body.children[0],summary=bubble.children[0],panel=bubble.children[1];
-  assert.equal(bubble.hidden,false);assert.equal(summary.textContent,'♫ 歌单');assert.equal(parseInt(bubble.style.left),546,'bubble stays inside viewport on right edge');
+  assert.equal(bubble.hidden,false);assert.equal(summary.textContent,'♫ 歌单');assert(parseInt(bubble.style.left)>=8&&parseInt(bubble.style.left)+224<=992,'bubble stays inside viewport on right edge');
   summary.emit('click');assert.equal(panel.hidden,false);assert.equal(summary.attrs['aria-expanded'],'true');
   const volume=panel.children[1].children[0];volume.value='0.3';volume.emit('input');assert.equal(select('#music-audio').volume,0.3);
-  summary.emit('click');assert.equal(panel.hidden,true);assert.equal(select('#workspace-dialog').open,true);assert.equal(select('#music-search').focused,true);
-  await context.window.XYMusic.toggle();assert.equal(summary.textContent,'Ⅱ 歌单');assert.equal(panel.children[0].children[1].textContent,'播放');
+  summary.emit('click');assert.equal(panel.hidden,true);assert.notEqual(select('#workspace-dialog').open,true,'second click only collapses');panel.children[2].click();assert.equal(select('#workspace-dialog').open,true);assert.equal(select('#music-search').focused,true);
+  await context.window.XYMusic.toggle();assert.equal(summary.textContent,'已暂停 · 歌单');assert.equal(panel.children[0].children[1].textContent,'播放');
   dispatch('xy:music-state',{playing:true,title:'<img onerror=bad>',artist:'artist'});assert.equal(summary.textContent,'♫ <img onerror=bad> — artist');assert.equal(summary.children.length,0,'metadata is text, never markup');
   console.log('Music queue checks passed: local/remote switching, search append, playback state, controls and URL cleanup.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

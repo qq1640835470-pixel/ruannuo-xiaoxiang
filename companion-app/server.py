@@ -1,7 +1,9 @@
 """Local-only companion MVP: chat, tasks, typed connectors, encrypted provider access."""
 from __future__ import annotations
 import app_paths
+import base64, binascii
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
+import activity_monitor, speech_service
 import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes, local_models, local_adaptation
 import connectors, providers, feedback_bridge, runtime_log, local_features, web_tools, music_service, companion_knowledge, persistent_memory, model_routing, typed_tools
 
@@ -9,12 +11,13 @@ ROOT=pathlib.Path(__file__).resolve().parent
 DATA=app_paths.DATA
 DB=DATA/'assistant.sqlite3'
 PORT=18764
-VERSION='0.3.2'
+VERSION='0.3.3'
 BUILD_ID=hashlib.sha256(b''.join(p.read_bytes() for p in sorted([*ROOT.glob('*.py'),*ROOT.joinpath('web').glob('*.js'),*ROOT.joinpath('web').glob('*.css'),ROOT/'web'/'index.html']))).hexdigest()[:12]
 LOCK=threading.RLock()
 CHAT_LOCK=threading.Lock()
 PET_LOCK=threading.Lock()
 SESSION=secrets.token_urlsafe(32)
+MONITOR=None
 STATUSES={'pending','active','paused','done'}
 DEFAULT_SETTINGS={'provider':'gemini','api_generation_enabled':True,'reminders_enabled':False,
     'budget_limit_cny':10.0,'voice_provider':'browser','theme':'sakura','display_name':'徐彧',
@@ -29,8 +32,12 @@ def connect():
         with c:yield c
     finally:c.close()
 def init():
+    global MONITOR
     DATA.mkdir(parents=True,exist_ok=True)
     runtime_log.configure(DATA)
+    if MONITOR:MONITOR.close()
+    MONITOR=activity_monitor.Monitor(DATA)
+    if MONITOR.enabled:MONITOR.start()
     with connect() as c:
         c.executescript('''CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,title TEXT,details TEXT,scheduled_at TEXT,status TEXT,created_at TEXT);
         CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,role TEXT,content TEXT,created_at TEXT);
@@ -568,12 +575,12 @@ def pet_chat(body):
             history=[dict(r) for r in c.execute('SELECT role,content FROM (SELECT rowid,role,content FROM messages ORDER BY rowid DESC LIMIT 2) ORDER BY rowid')]
         current=dt.datetime.fromisoformat(now())
         ages=[(current-dt.datetime.fromisoformat(r['created_at'])).total_seconds() for r in recent]
-        if ages and min(ages)<(600 if trigger=='idle' else 30):return {'skipped':'cooldown'}
+        if ages and min(ages)<(900 if trigger=='idle' else 30):return {'skipped':'cooldown'}
         if sum(0<=age<86400 for age in ages)>=24:return {'skipped':'daily_limit'}
         provider=s['pet_provider'];selected=s['pet_models'].get(provider,providers.PET_MODELS[provider])
-        if trigger=='idle' and providers.model_rates(provider,selected) is None:
-            if s.get('local_fallback_enabled') and local_runtime.status()['installed']:provider='local';selected=local_runtime.choose(history,companion=True)['model']
-            else:return {'skipped':'unknown_price','detail':'当前闲聊型号价格未知，自动闲聊已暂停。可选择本机Qwen或有已核对保护估算的型号。'}
+        if trigger=='idle' and provider!='local':
+            if local_runtime.status()['installed']:provider='local';selected=local_runtime.choose(history,companion=True)['model']
+            else:return {'skipped':'free_only','detail':'自动闲聊仅使用本地模型；当前本地模型不可用，已暂停。'}
         if provider=='local':selected=local_runtime.choose(history,companion=True)['model']
         uid=reserve(provider,selected)
         with connect() as c:c.execute('UPDATE usage SET metadata=? WHERE id=?',(json.dumps({'purpose':'pet_chat','trigger':trigger}),uid))
@@ -594,6 +601,32 @@ def pet_chat(body):
                         'diagnostic':e.diagnostic if isinstance(e,providers.ProviderHTTPError) else {'category':'unclassified_failure'}})
             return {'error':True,'detail':'本次AI闲聊没有完成；没有重试或切换提供方。','budget':budget()}
     finally:PET_LOCK.release()
+
+
+def analyze_image(body):
+    if not CHAT_LOCK.acquire(blocking=False):raise ValueError('本机模型正在处理其他请求，请稍后重试。')
+    try:
+        image=body.get('image')
+        if not isinstance(image,dict) or not isinstance(image.get('base64'),str):raise ValueError('请选择本机图片。')
+        try:raw=base64.b64decode(image['base64'],validate=True)
+        except (ValueError,binascii.Error):raise ValueError('图片编码无效。') from None
+        return local_runtime.analyze_images(body.get('prompt','描述这张图片。'),[{'data':raw,'mime_type':image.get('mime_type')}])
+    finally:CHAT_LOCK.release()
+
+
+def music_commentary(body):
+    title=body.get('title');artist=body.get('artist','')
+    if not isinstance(title,str) or not title.strip() or len(title)>160 or not isinstance(artist,str) or len(artist)>160:raise ValueError('请先选择歌曲。')
+    if not CHAT_LOCK.acquire(blocking=False):raise ValueError('正在处理其他请求，稍后再聊这首歌吧。')
+    try:
+        if not local_runtime.status()['installed']:return {'text':'正在听《'+title+'》。你喜欢它的旋律，还是它带来的回忆？','source':'local_template','model':None}
+        history=[{'role':'user','content':'播放器当前歌曲：'+title+'，歌手：'+artist+'。只说一句自然的音乐闲聊，不捏造听到的旋律、歌词内容或我的感受。'}]
+        result=providers.chat('local',history,'以小祥的克制而温柔的语气，只问一个关于听歌感受的问题，用问号结尾，不先评价旋律或歌词。未处理音频，不得假装听见。不调用工具。',companion=True)
+        text=result['text'].strip()[:160]
+        if not text.endswith(('？','?')):return {'text':'正在听《'+title+'》。你更喜欢它的旋律，还是它带来的回忆？','source':'local_template','model':result['model']}
+        return {'text':text,'source':'local_model','model':result['model']}
+    finally:CHAT_LOCK.release()
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args):pass
@@ -626,7 +659,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return True
     def body(self):
         size=int(self.headers.get('Content-Length','0'))
-        if size<0 or size>(1000000 if urllib.parse.urlsplit(self.path).path=='/api/feedback-local' else 40000):raise ValueError('请求过长')
+        if size<0 or size>({'/api/feedback-local':1000000,'/api/local/analyze-image':12000000}.get(urllib.parse.urlsplit(self.path).path,40000)):raise ValueError('请求过长')
         b=json.loads(self.rfile.read(size) or b'{}')
         if not isinstance(b,dict):raise ValueError('请求必须是对象')
         return b
@@ -638,6 +671,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p=='/api/health':return self.send(200,{'app':'study-life-companion','version':VERSION,'build_id':BUILD_ID,'ok':True,'auto_open':True,'companion_renderer':'sprite2d','pet_world':True})
             if p=='/api/companion/library':return self.send(200,companion_knowledge.library(time_context(),weather=location_service.recent(DATA) or web_tools.recent_weather(),task_count=len(list_tasks())))
             if p=='/api/diagnostics':return self.send(200,{'version':VERSION,'events':runtime_log.recent(100)})
+            if p=='/api/activity/status':return self.send(200,MONITOR.status())
+            if p=='/api/speech/status':return self.send(200,speech_service.status(DATA))
+            if p.startswith('/api/speech/audio/'):return self.send(200,speech_service.audio_path(p.rsplit('/',1)[-1],DATA).read_bytes(),'audio/mpeg')
             if p=='/api/routes/status':return self.send(200,maps_routes.status(DATA))
             if p=='/api/local/model':return self.send(200,local_runtime.status())
             if p=='/api/local/adaptation':return self.send(200,local_adaptation.status(DATA))
@@ -723,6 +759,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='PATCH' and p=='/api/local/adaptation':return self.send(200,local_adaptation.configure(DATA,b))
             if method=='DELETE' and p.startswith('/api/local/adaptation/'):
                 return self.send(200,local_adaptation.delete(DATA,p.rsplit('/',1)[-1]))
+            if method=='POST' and p=='/api/local/analyze-image':return self.send(200,analyze_image(b))
+            if method=='POST' and p=='/api/activity/settings':return self.send(200,MONITOR.configure(b.get('enabled')))
+            if method=='POST' and p=='/api/speech/retry':return self.send(200,speech_service.retry(DATA))
+            if method=='POST' and p=='/api/music/commentary':return self.send(200,music_commentary(b))
             if method=='POST' and p=='/api/routes/settings':return self.send(200,maps_routes.configure(b,DATA))
             if method=='POST' and p=='/api/routes/plan':return self.send(200,maps_routes.plan(b.get('origin'),b.get('destination'),b.get('mode','transit'),b.get('provider'),DATA))
             if method=='POST' and p=='/api/location/update':return self.send(200,location_service.update(b,DATA))
@@ -806,7 +846,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 aid=p.split('/')[3]
                 return self.send(200,execute_action(aid))
             if method=='POST' and p=='/api/speech':
-                return self.send(409,{'error':'Fish免费期限资料存在冲突，远程语音暂不启用。可使用浏览器朗读；未调用收费语音。'})
+                return self.send(200,speech_service.generate(b.get('text'),DATA,b.get('trigger','manual')))
             if method=='POST' and p=='/api/shutdown':
                 self.send(200,{'ok':True});threading.Thread(target=self.server.shutdown,daemon=True).start();return
             self.send(404,{'error':'这个接口尚未支持'})
@@ -818,5 +858,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def run():
     init();server=http.server.ThreadingHTTPServer(('127.0.0.1',PORT),Handler)
     try:server.serve_forever()
-    finally:server.server_close()
+    finally:
+        if MONITOR:MONITOR.close()
+        server.server_close()
 if __name__=='__main__':run()

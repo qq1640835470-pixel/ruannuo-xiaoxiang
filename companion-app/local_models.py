@@ -5,15 +5,25 @@ import app_paths,local_runtime_setup as setup
 
 SMALL='qwen3-4b-q4_k_m'
 LARGE='qwen3-8b-q4_k_m'
+GEMMA='gemma3-4b-it-q4_0'
 CATALOG={
     SMALL:{'label':'Qwen3 4B · Q4_K_M','file':setup.MODEL_NAME,'size':setup.MODEL_SIZE,'sha256':setup.MODEL_SHA,'layers':37},
-    LARGE:{'label':'Qwen3 8B · Q4_K_M','file':'Qwen3-8B-Q4_K_M.gguf','size':5027783488,'sha256':'d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785','layers':37}}
+    LARGE:{'label':'Qwen3 8B · Q4_K_M','file':'Qwen3-8B-Q4_K_M.gguf','size':5027783488,'sha256':'d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785','layers':37},
+    GEMMA:{'label':'Gemma 3 4B · QAT Q4_0 · 图像','file':setup.GEMMA_ASSETS[0]['file'],'size':setup.GEMMA_ASSETS[0]['size'],'sha256':setup.GEMMA_ASSETS[0]['sha256'],'layers':35,'context':8192,'projector':setup.GEMMA_ASSETS[1]}}
+
+def assets(model):
+    item=CATALOG[model]
+    return [item,*([item['projector']] if item.get('projector') else [])]
+
+def capabilities(model):
+    return {'text':True,'image':model==GEMMA,'tools':model!=GEMMA}
 
 def installed(model):
-    item=CATALOG[model];path=setup.BASE/item['file']
     try:
-        proof=json.loads(path.with_suffix('.gguf.download.json').read_text(encoding='utf-8'))
-        return path.is_file() and path.stat().st_size==item['size'] and proof.get('state')=='verified' and proof.get('sha256')==item['sha256']
+        for item in assets(model):
+            path=setup.BASE/item['file'];proof=json.loads(path.with_suffix('.gguf.download.json').read_text(encoding='utf-8'))
+            if not (path.is_file() and path.stat().st_size==item['size'] and proof.get('state')=='verified' and proof.get('sha256')==item['sha256']):return False
+        return True
     except (OSError,ValueError):return False
 
 def selection():
@@ -52,7 +62,8 @@ def gpu_layers(model):
     try:
         result=subprocess.run(['nvidia-smi','--query-gpu=memory.free','--format=csv,noheader,nounits'],capture_output=True,text=True,timeout=3,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         free=int(result.stdout.strip().splitlines()[0]);item=CATALOG[model]
-        # Official configs: 8 KV heads, head dimension 128; F16 K/V at 16K context.
+        # Conservative F16 KV/compute allowance; Gemma additionally reserves its projector.
         per_layer=item['size']/1024**2/item['layers']+64
-        return max(0,min(item['layers'],math.floor((free-1024)/per_layer)))
+        reserve=1024+(item['projector']['size']/1024**2+512 if item.get('projector') else 0)
+        return max(0,min(item['layers'],math.floor((free-reserve)/per_layer)))
     except (OSError,ValueError,IndexError,subprocess.SubprocessError):return 0

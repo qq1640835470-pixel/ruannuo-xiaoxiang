@@ -5,3 +5,13 @@ body{font-size:16px}.message-text{font-size:calc(17px * var(--reading-scale,1))!
 @media(max-width:600px){.topbar{padding:11px 16px}.topbar>div:first-child{max-width:100px}.header-tools{gap:5px;flex:1}.workspace-button{font-size:12px;padding:7px}.clock-panel{min-width:75px}.clock-panel time{font-size:19px}.settings-drawer{width:100%}.history-dialog{padding:14px}.history-dialog footer{font-size:12px}}
 
 .pet:not(.pet-free) .pet-mode-panel[open]{position:fixed;left:min(224px,calc(100vw - 238px));top:140px;z-index:170;width:224px;max-height:calc(100dvh - 170px);overflow:auto;box-shadow:0 8px 28px #405b8133;padding:12px}.pet:not(.pet-free) .pet-mode-panel[open] summary{text-align:left}
+:root{--app-font:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif}
+body,button,input,textarea,select,option,summary,code,pre,p,span,small,label,a,time{font-family:var(--app-font)!important}
+h1,h2,.brand{font-family:XiangRound,"Microsoft YaHei UI",sans-serif!important}
+.settings-drawer,.workspace-dialog{font-size:16px;line-height:1.7}
+.settings-drawer :is(.setting-label,.toggle-row,.muted-text,.local-pref-row,.connector-card,.local-control-row,.local-permissions),.workspace-dialog :is(.muted-text,.music-input,.music-track){font-size:15px!important;line-height:1.75}
+.settings-drawer :is(small,.cost-notice,.privacy-note,.status-badge,.connector-card p),#history-status,.history-dialog article small{font-size:14px!important;line-height:1.75}
+.settings-drawer :is(input,select,button,summary),.workspace-dialog :is(input,select,button){font-size:15px}
+.settings-drawer h3,.workspace-dialog h3{font-size:18px}
+.local-permissions{font-size:14px!important}.pet-bubble p{font-size:15px!important;line-height:1.75}.pet-bubble-heading,.pet-controls button{font-size:13px!important}
+.history-dialog :is(button,input){font-size:15px}.task-meta,.task-form label span,.composer-hint,.privacy-note{font-size:13px!important}.task-main p,.task-form label,.task-controls select,.busy-text{font-size:14px!important}

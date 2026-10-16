@@ -30,7 +30,7 @@
   let loaded=false,raf=0,lastFrame=0,blinkUntil=0,nextBlink=0,mood="calm",moodUntil=0;
   let lookX=0,lookY=0,targetX=0,targetY=0,pose="stand",poseBounds=[],poseLoaded=false,world=null;
   let bubbleTimer=0,idleTimer=0,moodTimer=0,busy=false,patState={times:[]},frameBounds=[],lastLine={};
-  let activityChoice='auto',musicPlaying=false,activity='idle',sulkUntil=0;
+  let activityChoice='auto',musicPlaying=false,activity='idle',sulkUntil=0,activityStarted=0,contextActivity={},contextUntil=0,automatic=true,lastIdleAttempt=0;
   let transition=null,displayHead={x:180,y:110},patStarted=-10000,greetStarted=-10000,dizzyUntil=0,petRequest=false,petAI=true,petProvider='gemini',preparedDialogue=null;
   const logicalSize={width:360,height:440};
   const poseFrames=[];
@@ -62,7 +62,8 @@
     if(value!==preparedDialogue)window.XYDialogue?.remember(value);preparedDialogue=null;
     clearTimeout(bubbleTimer);text.textContent=value;kind.textContent=label;bubble.classList.remove("is-resting");
     world?.refreshBubble();
-    bubbleTimer=setTimeout(()=>bubble.classList.add("is-resting"),duration);
+    window.dispatchEvent(new CustomEvent('xy:pet-layout',{detail:{bubble:bubble.getBoundingClientRect().toJSON(),resting:false}}));
+    bubbleTimer=setTimeout(()=>{bubble.classList.add("is-resting");window.dispatchEvent(new CustomEvent('xy:pet-layout',{detail:{resting:true}}));},duration);
   }
   function expression(value,duration=2400){clearTimeout(moodTimer);if(mood!==value)beginTransition(170);mood=value;moodUntil=performance.now()+duration;root.dataset.mood=value;window.dispatchEvent(new CustomEvent('xy:pet-reaction',{detail:{mood:value}}));draw(performance.now());start();moodTimer=setTimeout(()=>{if(mood!=="calm")beginTransition(180);mood="calm";draw(performance.now());start();},duration+20);}
   function setQuiet(value,announce=true){
@@ -74,12 +75,13 @@
   }
   async function aiLine(trigger='manual'){
     if(petRequest||!petAI||(quiet&&trigger==='idle')||!active()||busy)return false;
+    if(trigger==='idle'){if(Date.now()-lastIdleAttempt<900000)return false;lastIdleAttempt=Date.now();}
     petRequest=true;root.dataset.aiState='thinking';
     try{
       const r=await api('/api/companion/chat',{method:'POST',body:JSON.stringify({trigger,pose})});
       if(r.budget&&typeof renderBudget==='function')renderBudget(r.budget);
       root.dataset.aiState=r.error?'failed':r.skipped||'ready';
-      if(r.text&&active()&&(!quiet||trigger==='manual')&&!busy){root.dataset.replyModel=r.model||'';say(r.text,'小祥 · 对你说',16000);expression('shy',2400);return true;}
+      if(r.text&&active()&&(!quiet||trigger==='manual')&&!busy){root.dataset.replyModel=r.model||'';say(r.text,'小祥 · 对你说',16000);expression('shy',2400);window.dispatchEvent(new CustomEvent('xy:companion-reply',{detail:{text:r.text,trigger,pose,model:r.model,metadata:r.metadata||r.context||{}}}));return true;}
       if(trigger==='manual'&&r.error)say('唔，这次没能接上话。我在这里，等会儿再聊吧。','小祥 · 回应你');
       if(trigger==='manual'&&r.skipped){const messages={cooldown:'刚刚那句话，我还想听听你的回答呢。',daily_limit:'今天已经聊了不少，先让我安静陪你一会儿吧。',disabled:'AI闲聊暂时关着，我先在这里陪你。',busy:'我先把你刚才的事情处理好，再陪你聊。'};say(messages[r.skipped]||'我在这里，稍后再聊。','小祥 · 回应你');}
       return !!r.skipped;
@@ -98,7 +100,7 @@
         if(petAI)await aiLine('idle');else say(randomLine('idle'),'小祥 · 碎碎念');
       }
       scheduleIdle();
-    },600000+Math.random()*300000);
+    },900000);
   }
   function pat(){
     const time=performance.now();patState=M.recordPat(patState,time);
@@ -126,8 +128,9 @@
     syncResolution();
     const still=quiet||reduce.matches||localMotion==='quiet',amplitude=localMotion==='gentle'?.45:1;
     if(!still&&time>nextBlink){blinkUntil=time+190;nextBlink=time+3000+Math.random()*2600;}
-    activity=M.activity(new Date().getHours(),musicPlaying,activityChoice);root.dataset.activity=activity;
-    const frame=(!still&&time<blinkUntil)||time-patStarted<900||activity==='sleepy'?1:mood==="shy"||activity==='happy'?2:mood==="pout"||time<sulkUntil?3:0;
+    const nextActivity=M.activity(new Date().getHours(),musicPlaying,activityChoice==='auto'&&!automatic?'idle':activityChoice,time<contextUntil?contextActivity:{});
+    if(activity!==nextActivity){activity=nextActivity;activityStarted=time;}root.dataset.activity=activity;
+    const frame=(!still&&time<blinkUntil)||time-patStarted<900||activity==='sleepy'||activity==='happy'?1:mood==="shy"||activity==='happy'?2:mood==="pout"||time<sulkUntil?3:0;
     root.dataset.frame=String(frame);root.dataset.mood=mood;
     const poseIndex={held:0,sit:1,hang:2,peek:3}[pose],usePose=poseLoaded&&poseIndex!==undefined;
     const closure=still?0:Math.max(M.eyelid(time,blinkUntil),(time-patStarted<900?.92:0));
@@ -150,7 +153,8 @@
     const idle=still?{lean:0,bob:0,sway:0}:M.idle(time),greet=still?0:M.greet(time-greetStarted)*amplitude;
     idle.lean*=amplitude;idle.bob*=amplitude;idle.sway*=amplitude;
     root.dataset.idleMotion=still?'still':idle.kind;
-    const bounce=still?0:Math.sin(time/1050)*1.2*amplitude+idle.bob-Math.abs(greet)*2+(activity==='music'?Math.sin(time/310)*2.5:activity==='lunch'?Math.sin(time/230)*.8:activity==='sleepy'?Math.sin(time/2400)*3:0);
+    const reaction=still?{bob:0,lean:0}:M.reaction(activity,time-activityStarted);idle.lean+=reaction.lean;
+    const bounce=still?0:reaction.bob+Math.sin(time/1050)*1.2*amplitude+idle.bob-Math.abs(greet)*2+(activity==='music'?Math.sin(time/310)*2.5:activity==='lunch'?Math.sin(time/230)*.8:activity==='sleepy'?Math.sin(time/2400)*3:0);
     const supportY=h*(window.XYPetPhysics.supports[pose]??.965);
     const tilt=pose==='hang'?.025:pose==='sit'?.013:.009;
     ctx.translate(w/2,supportY);ctx.rotate((still?0:Math.sin(time/1350)*tilt*amplitude+lookX*.008*amplitude+idle.lean+greet*.025)+patMotion*.035);ctx.scale(1+patMotion*.016,1-patMotion*.025);ctx.translate(-w/2,-supportY);
@@ -189,6 +193,21 @@
         ctx.font='30px sans-serif';ctx.fillStyle='#bf9b5e';ctx.fillText('!',dw*.36,top+65);
       }else if(activity==='happy'){
         ctx.font='26px sans-serif';ctx.fillStyle='#cf95b0';ctx.fillText('♡',dw*.34,top+60);
+      }
+      if(activity==='happy'||activity==='surprised'){
+        const mouthY=top+dh*.382,mouthX=dw*.012;
+        const skin=ctx.createRadialGradient(mouthX,mouthY,0,mouthX,mouthY,dw*.055);
+        skin.addColorStop(0,'#fff0ec');skin.addColorStop(.75,'#fff0ec');skin.addColorStop(1,'#fff0ec00');
+        ctx.fillStyle=skin;ctx.beginPath();ctx.ellipse(mouthX,mouthY,dw*.06,dh*.022,0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#875268';ctx.strokeStyle='#9b6878';ctx.lineWidth=1.15;
+        ctx.beginPath();
+        if(activity==='happy'){
+          ctx.moveTo(mouthX-dw*.033,mouthY-dh*.004);ctx.quadraticCurveTo(mouthX,mouthY+dh*.026,mouthX+dw*.033,mouthY-dh*.004);ctx.quadraticCurveTo(mouthX,mouthY+dh*.004,mouthX-dw*.033,mouthY-dh*.004);ctx.fill();
+          ctx.fillStyle='#e9a7b7';ctx.beginPath();ctx.ellipse(mouthX,mouthY+dh*.008,dw*.014,dh*.004,0,0,Math.PI*2);ctx.fill();
+        }else{
+          ctx.ellipse(mouthX,mouthY,dw*.018,dh*.014,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+          ctx.fillStyle='#fff9f4';for(const side of [-1,1]){ctx.beginPath();ctx.ellipse(side*dw*.115,top+dh*.298,dw*.009,dh*.006,0,0,Math.PI*2);ctx.fill();}
+        }
       }
       ctx.restore();
     }
@@ -248,9 +267,14 @@
     else if(d.type==="reply"&&typeof d.text==="string"){
       const value=d.text.replace(/[*#`]/g,"").trim();say(value.length>76?value.slice(0,75)+"…":value,"小祥 · 对你说",14000);expression("calm",1000);
     }
+    const metadata=d.metadata||d.context||{};
+    const explicit=metadata.activity||d.activity||({happy:'happy',surprised:'surprised'}[metadata.emotion||d.emotion]);
+    if(['happy','surprised','sleepy','lunch'].includes(explicit)){contextActivity={activity:explicit};contextUntil=performance.now()+16000;}
     scheduleIdle();
   });
   setQuiet(quiet,false);if(quiet)bubble.classList.add("is-resting");else say(randomLine("greeting"));
+  window.addEventListener('xy:music-commentary',event=>{const value=event.detail?.text;if(typeof value==='string'&&value.trim()&&!quiet){say(value,'小祥 · 这首歌',16000);}});
+  window.addEventListener('xy:pet-auto',event=>{automatic=event.detail?.enabled!==false;root.dataset.petAuto=String(automatic);draw(performance.now());start();});
   window.addEventListener('xy:music-state',event=>{musicPlaying=event.detail?.playing===true;draw(performance.now());start();});
   window.addEventListener('xy:pet-activity',event=>{activityChoice=['auto','idle','lunch','sleepy','music','happy','surprised'].includes(event.detail?.activity)?event.detail.activity:'auto';draw(performance.now());start();});
   const petStyle=document.createElement('link');petStyle.rel='stylesheet';petStyle.href='/live2d-pet.css';document.head.append(petStyle);

@@ -7,6 +7,11 @@ MODEL_NAME='Qwen3-4B-Q4_K_M.gguf'
 MODEL_SIZE=2497280256
 MODEL_SHA='7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5'
 MODEL_URL='https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/'+MODEL_NAME
+GEMMA_REPO='ggml-org/gemma-3-4b-it-qat-GGUF'
+GEMMA_REVISION='bbcac0d065076c47042838c0675c602411b0dd4c'
+GEMMA_ASSETS=(
+    {'file':'gemma3-4b/gemma-3-4b-it-qat-Q4_0.gguf','size':2526080992,'sha256':'ee91c3e7a4ab95d8c95672f9fcb58bf236b257e9f217966bcf53a5a6df4ab49a'},
+    {'file':'gemma3-4b/mmproj-model-f16-4B.gguf','size':851251744,'sha256':'c5271cab492e27cd123f808e9115a677b2ecfdb21c8152c1ad45cc455f3b592b'})
 HEADERS={'User-Agent':'StudyLifeAssistant-local-setup/0.3.1','Accept':'application/json'}
 
 def metadata(url):
@@ -134,15 +139,34 @@ def install_runtime():
     (BASE/'runtime.json').write_text(json.dumps({'version':tag,'executable':str(executable),'backend':'cuda' if any('cuda' in a['name'] for a in assets) else 'cpu','cpu_executable':str(cpu) if cpu else '', 'verified':True}),encoding='utf-8')
     return executable
 
+def gemma_documents():
+    directory=BASE/'gemma3-4b';directory.mkdir(parents=True,exist_ok=True);sources=[]
+    for name,url in (
+        ('README.upstream.md','https://huggingface.co/'+GEMMA_REPO+'/resolve/'+GEMMA_REVISION+'/README.md'),
+        ('Gemma-Terms-of-Use.html','https://ai.google.dev/gemma/terms'),
+        ('Gemma-Prohibited-Use-Policy.html','https://ai.google.dev/gemma/prohibited_use_policy')):
+        with urllib.request.urlopen(urllib.request.Request(url,headers=HEADERS),timeout=30) as response:content=response.read(2*1024*1024+1)
+        if len(content)>2*1024*1024:raise ValueError('Gemma许可资料超过预期大小。')
+        (directory/name).write_bytes(content)
+        sources.append({'file':name,'source':url,'sha256':hashlib.sha256(content).hexdigest()})
+    (directory/'NOTICE.txt').write_text('Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms\n',encoding='utf-8')
+    (directory/'sources.json').write_text(json.dumps({'repo':GEMMA_REPO,'revision':GEMMA_REVISION,'documents':sources},indent=2),encoding='utf-8')
+    return sources
+
 def install_model(model='4b'):
     if model=='4b':return download(MODEL_URL,BASE/MODEL_NAME,MODEL_SIZE,MODEL_SHA)
-    if model!='8b':raise ValueError('仅支持4b或8b。')
+    if model=='gemma3-4b':
+        gemma_documents()
+        for item in GEMMA_ASSETS:
+            download_parallel('https://huggingface.co/'+GEMMA_REPO+'/resolve/'+GEMMA_REVISION+'/'+pathlib.Path(item['file']).name,BASE/item['file'],item['size'],item['sha256'])
+        return BASE/GEMMA_ASSETS[0]['file']
+    if model!='8b':raise ValueError('仅支持4b、8b或gemma3-4b。')
     item=json.loads((pathlib.Path(__file__).parent/'assets/qwen8b-official.json').read_text(encoding='utf-8'))
     return download_parallel('https://huggingface.co/'+item['repo']+'/resolve/'+item['revision']+'/'+item['file'],BASE/item['file'],item['size'],item['sha256'])
 
 if __name__=='__main__':
     import argparse
-    parser=argparse.ArgumentParser();parser.add_argument('--model-only',action='store_true');parser.add_argument('--runtime-only',action='store_true');parser.add_argument('--model',choices=('4b','8b'),default='4b');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--model-only',action='store_true');parser.add_argument('--runtime-only',action='store_true');parser.add_argument('--model',choices=('4b','8b','gemma3-4b'),default='4b');args=parser.parse_args()
     try:
         if not args.runtime_only:install_model(args.model)
         if not args.model_only:install_runtime()

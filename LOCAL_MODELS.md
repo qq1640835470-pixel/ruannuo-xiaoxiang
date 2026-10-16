@@ -1,3 +1,8 @@
+# 0.3.3新增Gemma 3 4B
+
+GEMMA=gemma3-4b-it-q4_0，QAT Q4_0+F16视觉投影；官方固定revision和SHA见companion-app/local_models.py。D盘实际安装不代表克隆后已安装。运行python local_runtime_setup.py --model gemma3-4b --model-only下载官方两资产；先阅读Gemma官方条款。8192上下文，视觉batch/ubatch512；本地选图接口单独不执行工具。自动路由仍只Qwen4B/8B，Gemma手动选择。未做权重训练。
+
+---
 # 软糯小祥0.3.2 · 本机双模型
 
 ## 安装和入口

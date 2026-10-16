@@ -1,0 +1,46 @@
+{
+  "app_name": "xy",
+  "background_colors": [
+    "#f6c6d7",
+    "#ffffff"
+  ],
+  "character": "丰川祥子",
+  "style": "Q版像素风",
+  "method": "内置image_gen生成；Pillow仅封装Windows多尺寸ICO，保留透明度",
+  "reference": "D:/StudyLifePlan/artifacts/bandori-rolecards/sakiko.png",
+  "source": "C:\\Users\\16408\\.codex\\generated_images\\01a1392d-c333-7e62-8eee-5c4363c9d0e0\\exec-3fe407bd-4250-468c-8c3c-f9cc2d2535c3.png",
+  "png_size": [
+    1254,
+    1254
+  ],
+  "ico_sizes": [
+    [
+      16,
+      16
+    ],
+    [
+      24,
+      24
+    ],
+    [
+      32,
+      32
+    ],
+    [
+      48,
+      48
+    ],
+    [
+      64,
+      64
+    ],
+    [
+      128,
+      128
+    ],
+    [
+      256,
+      256
+    ]
+  ]
+}

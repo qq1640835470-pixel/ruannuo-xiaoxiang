@@ -19,6 +19,7 @@ PROVIDERS = {'amap': '高德地图', 'baidu': '百度地图', 'google': 'Google 
 GOOGLE_REASON = '暂未启用：需要独立 API Key、结算账户及展示策略核验。'
 _ENDPOINTS = {
     'amap_geo': 'https://restapi.amap.com/v3/geocode/geo',
+    'amap_poi': 'https://restapi.amap.com/v3/place/text',
     'amap_walking': 'https://restapi.amap.com/v3/direction/walking',
     'amap_transit': 'https://restapi.amap.com/v3/direction/transit/integrated',
     'baidu_geo': 'https://api.map.baidu.com/geocoding/v3/',
@@ -127,20 +128,36 @@ def _step(row):
 
 
 def _amap_geocode(address, key):
+    if re.search(r'(?:大学|校区|地铁站|火车站|[东南西北]站)$',address):
+        return _amap_landmark(address,key)
     raw = _request('amap_geo', {'address': address, 'key': key, 'output': 'JSON'})
     if str(raw.get('status')) != '1':
         raise RuntimeError('provider rejected')
     rows = raw.get('geocodes') or []
     if len(rows) != 1:
-        raise LookupError('地点没有唯一匹配，请补充城市、区县或门牌号。')
+        return _amap_landmark(address,key)
     row = rows[0]
     if row.get('level') in ('国家', '省', '市', '区县', '乡镇'):
-        raise LookupError('地点范围过大，请补充具体地址或地标。')
+        return _amap_landmark(address,key)
     location = row.get('location', '')
     if not isinstance(location, str) or not re.fullmatch(r'-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?', location):
         raise RuntimeError('invalid coordinates')
     return {'coordinate': location, 'label': _text(row.get('formatted_address')) or address,
             'city': _text(row.get('citycode')) or _text(row.get('city'))}
+
+
+def _amap_landmark(address,key):
+    raw=_request('amap_poi',{'keywords':address,'key':key,'offset':10,'extensions':'base','output':'JSON'})
+    if str(raw.get('status'))!='1':raise RuntimeError('provider rejected')
+    normalize=lambda value:re.sub(r'[\s()（）·-]','',value)
+    query=normalize(address)
+    matches=[row for row in raw.get('pois',[]) if isinstance(row.get('name'),str) and len(normalize(row['name']))>=4 and query.endswith(normalize(row['name']))]
+    if len(matches)!=1:
+        names='、'.join(_text(row.get('name')) for row in raw.get('pois',[])[:3])
+        raise LookupError('地点尚未唯一匹配，请补充校门、车站或区县。'+('候选：'+names if names else ''))
+    row=matches[0];coordinate=row.get('location','')
+    if not isinstance(coordinate,str) or not re.fullmatch(r'-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?',coordinate):raise RuntimeError('invalid coordinates')
+    return {'coordinate':coordinate,'label':_text(row['name'])+'（'+_text(row.get('cityname'))+'）','city':_text(row.get('cityname'))}
 
 
 def _baidu_geocode(address, key):
@@ -171,7 +188,8 @@ def _amap_routes(raw, mode):
             steps = [_step(s) for s in row.get('steps', [])]
         else:
             for segment in row.get('segments', []):
-                if segment.get('railway') or segment.get('taxi'):
+                railway=segment.get('railway') or {}
+                if any(railway.get(field) for field in ('id','name','trip','departure_stop','arrival_stop')) or segment.get('taxi'):
                     complete = False
                     break
                 walking = segment.get('walking') or {}
@@ -272,6 +290,6 @@ def plan(origin, destination, mode='walking', provider=None, data_dir=None):
                 'summary': f'{PROVIDERS[provider]}返回{len(routes)}条' + ('步行' if mode == 'walking' else '公交') + '方案；请先核对匹配地点。',
                 'note': '用时为平台估算；未提供实时到站或可确认票价，请以车站公告和实际运营为准。'}
     except LookupError as error:
-        return {**base, 'status': 'needs_clarification', 'summary': str(error)}
+        return {**base, 'status': 'needs_clarification', 'summary': str(error).replace(key,'[已隐藏]')}
     except Exception:
         return {**base, 'status': 'unavailable', 'summary': '地图服务未完成查询，请检查本机 Key、服务权限、配额或网络后重试。未生成路线。'}

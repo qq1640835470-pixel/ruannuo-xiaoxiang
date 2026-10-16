@@ -39,7 +39,7 @@ function renderMessages() {
       const details=executionBlock(message);if(details)content.append(details);
       const previous=visibleMessages.slice(0,index).reverse().find(m=>m.role==="user");
       const retry=chatRetry(message,previous?.content);if(retry)content.append(retry);
-      if(body){const voice=el("button","text-button voice-button","▷ 朗读");voice.type="button";voice.addEventListener("click",()=>readAloud(body,voice));content.append(voice);}
+      if(body){const voice=el("button","text-button voice-button","▷ 生成语音");voice.type="button";voice.addEventListener("click",()=>readAloud(body,voice));content.append(voice);}
     }
     if(message.created_at)content.append(el("div","message-time",dateLabel(message.created_at)));
     row.append(content);conversation.append(row);
@@ -143,12 +143,14 @@ async function refreshBalances(){const button=$("#refresh-balances");button.disa
 function renderBudget(budget){const target=$("#budget-result");if(!target)return;if(!budget){target.textContent="正在等待本机预算数据。";return;}const money=v=>Number.isFinite(Number(v))?`¥${Number(v).toFixed(2)}`:"未知";target.textContent=`本机预算上限 ${budget.unlimited?"不限":money(budget.limit_cny)}\n已估算 ${money(budget.spent_estimate_cny)} · 预留 ${money(budget.reserved_cny)}\n${budget.unlimited?"不按本机余额拦截":"剩余 "+money(budget.remaining_cny)} · ${budget.requests??0} 次请求`;}
 async function shutdown(){if(!confirm("退出本机助手服务？退出后需要重新启动才能继续使用。"))return;const button=$("#shutdown-button");button.disabled=true;try{await api("/api/shutdown",{method:"POST",body:"{}"});$("#connection-status").textContent="服务已退出";$("#settings-save-status").textContent="本机服务已退出，可以关闭此页面。";$("#send-button").disabled=true;}catch(e){error(`退出失败：${e.message}`,"#settings-error");button.disabled=false;}}
 function stopReadAloud(){
+  window.XYSpeech?.stop();
   const current=readAloud.current;readAloud.current=null;
   if('speechSynthesis' in window)speechSynthesis.cancel();
-  if(current?.button){current.button.textContent='▷ 朗读';current.button.setAttribute('aria-pressed','false');}
+  if(current?.button){current.button.textContent='▷ 生成语音';current.button.setAttribute('aria-pressed','false');}
   const stop=$('#speech-stop');if(stop)stop.hidden=true;
 }
 function readAloud(text,button){
+  if(window.XYSpeech)return window.XYSpeech.speak(text,button);
   if(!('speechSynthesis' in window)){error('此浏览器不支持系统语音朗读。');return;}
   if(readAloud.current?.text===text){stopReadAloud();return;}
   stopReadAloud();const utterance=new SpeechSynthesisUtterance(text);utterance.lang='zh-CN';utterance.rate=.95;

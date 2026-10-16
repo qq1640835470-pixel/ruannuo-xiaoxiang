@@ -68,7 +68,7 @@ def local_status(data_dir):
                 {'name':'已支持程序启动','scope':'固定程序清单；无任意命令执行','enabled':True},
                 {'name':'本地音乐','scope':'只读取你在文件选择器中选择的音乐；不上传','enabled':True},
                 {'name':'公开网页','scope':'同窗右侧WebView2；网页无Python/系统工具接口','enabled':True},
-                {'name':'管理员/持续监测/聊天读取/付款','scope':'未启用','enabled':False}],
+                {'name':'管理员/聊天正文读取/付款','scope':'未启用','enabled':False}],
             'self_improvement':'可调整已支持偏好和运行本地自检，不执行模型生成的代码。'}
 
 def maintenance(data_dir,check='health'):

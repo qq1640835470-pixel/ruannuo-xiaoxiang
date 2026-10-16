@@ -264,8 +264,8 @@ def chat(provider,history,context,*,companion=False,model=None):
     runtime_log.event('model_completed',**{k:usage[k] for k in ('provider','requested_model','returned_model','input_tokens','output_tokens','elapsed_seconds','estimate_cny') if k in usage})
     return {'text':text,'calls':calls[:3] if tools_enabled else [],'usage':usage,'model':actual_model}
 
-def speech(text):
+def speech(text,reference_id=None):
     # Explicit free developer model only. No fallback to a paid voice model.
     key=hub.load_keys()['fish_audio']
-    return post('https://api.fish.audio/v1/tts',key,{'text':text[:600],'format':'mp3','mp3_bitrate':128,'latency':'normal'},
+    return post('https://api.fish.audio/v1/tts',key,{'text':text[:600],'format':'mp3','mp3_bitrate':128,'latency':'normal',**({'reference_id':reference_id} if reference_id else {})},
                 'fish_audio',extra={'model':'s2.1-pro-free'},binary=True)

@@ -65,7 +65,16 @@ class RoutesTests(unittest.TestCase):
         with patch.object(routes, '_request', return_value={'status': '1', 'geocodes': AMAP_GEO['geocodes'] * 2}) as request:
             result = routes.plan('甲', '乙', data_dir=self.directory)
             self.assertEqual(result['status'], 'needs_clarification')
-            self.assertEqual(request.call_count, 1)
+            self.assertEqual(request.call_count, 2)
+
+    def test_poi_exact_match_beats_similar_campus(self):
+        self.save()
+        poi={'status':'1','pois':[{'name':'深圳大学(粤海校区)','location':'113.936577,22.532641','cityname':'深圳市'},{'name':'深圳大学(沧海校区)','location':'113.939384,22.528107','cityname':'深圳市'}]}
+        with patch.object(routes,'_request',return_value=poi) as request:
+            result=routes._amap_geocode('深圳大学粤海校区','fixture_secret_123')
+            self.assertEqual(result['coordinate'],'113.936577,22.532641')
+            self.assertEqual(result['city'],'深圳市')
+            self.assertEqual(request.call_args.args[0],'amap_poi')
 
     def test_baidu_imprecise_address_stops(self):
         self.save('baidu')
@@ -73,6 +82,13 @@ class RoutesTests(unittest.TestCase):
         with patch.object(routes, '_request', return_value=geo) as request:
             self.assertEqual(routes.plan('甲', '乙', data_dir=self.directory)['status'], 'needs_clarification')
             self.assertEqual(request.call_count, 1)
+
+    def test_empty_amap_railway_metadata_is_not_a_train(self):
+        fixture=json.loads(json.dumps(AMAP_BUS))
+        fixture['route']['transits'][0]['segments'][0]['railway']={'via_stops':[],'alters':[],'spaces':[]}
+        result=routes._amap_routes(fixture,'transit')
+        self.assertEqual(len(result),1)
+        self.assertIn('测试1路',result[0]['steps'][-1]['instruction'])
 
     def test_provider_errors_are_generic_and_no_auto_fallback(self):
         self.save('baidu')

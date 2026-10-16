@@ -12,6 +12,5 @@
   const searchStatus=document.createElement('p');searchStatus.className='muted-text';searchStatus.setAttribute('role','status');const results=document.createElement('div');results.id='music-search-results';results.className='music-list';$('.music-input').before(form,searchStatus,results);
   form.addEventListener('submit',async e=>{e.preventDefault();const query=input.value.trim();if(!query)return;const revision=++searchRevision;button.disabled=true;searchStatus.textContent='正在搜索…';try{const d=await call('/api/music/search?q='+encodeURIComponent(query));if(revision!==searchRevision)return;results.replaceChildren(...(d.tracks||[]).map(track=>{const b=document.createElement('button');b.type='button';b.className='music-track';b.textContent=track.name+(track.artists?' — '+track.artists:'');b.addEventListener('click',()=>window.dispatchEvent(new CustomEvent('xy:music-select',{detail:{...track,remote:true}})));return b;}));searchStatus.textContent=(d.tracks?.length?d.detail:'没有找到歌曲。');}catch(e){if(revision===searchRevision)searchStatus.textContent=e.message;}finally{if(revision===searchRevision)button.disabled=false;}});
   window.addEventListener('pagehide',()=>clearTimeout(timer));
-  $('#workspace-open').addEventListener('click',loadPlaylists);
-  loadPlaylists();
+  window.addEventListener('xy:workspace-page',event=>{if(event.detail?.page==='music')loadPlaylists();});
 })();

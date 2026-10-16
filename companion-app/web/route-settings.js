@@ -22,6 +22,7 @@
   const get = id => section.querySelector('#route-' + id);
   let busy = false, current = {};
   async function request(path, body) {
+    if (typeof api === 'function') return api(path, body ? {method:'POST',body:JSON.stringify(body)} : {});
     const response = await fetch(path, {method: body ? 'POST' : 'GET', headers: {'Content-Type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '路线服务暂不可用。');
@@ -42,7 +43,7 @@
     busy = true;
     section.querySelectorAll('button').forEach(b => b.disabled = true);
     try { await action(); }
-    catch { get('status').textContent = '操作未完成。请检查路线服务连接、地图 Key 和服务权限后重试。'; }
+    catch (e) { get('status').textContent = e.message || '操作未完成，请重试。'; }
     finally { busy = false; section.querySelectorAll('button').forEach(b => b.disabled = false); }
   }
   get('provider').addEventListener('change', () => { get('key').value = ''; selectedStatus(); });

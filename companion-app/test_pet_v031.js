@@ -15,7 +15,7 @@ for(const edge of ['left','right','top','bottom']){
   assert.ok(edge==='left'?point.x<0:edge==='right'?point.x+size.width>view.width:edge==='top'?point.y<0:point.y+size.height>view.height,'window peek actually crosses viewport '+edge);
   const result=P.dockBounds(point,size,view,{id:'window-edge:'+edge,mode:'peek',edge});assert.deepEqual(result,point);
 }
-assert.equal(M.activity(12,false),'lunch');assert.equal(M.activity(23,false),'sleepy');assert.equal(M.activity(2,true),'music');assert.equal(M.activity(12,false,'happy'),'happy');
+assert.equal(M.activity(12,false),'idle');assert.equal(M.activity(23,false),'idle');assert.equal(M.activity(12,false,'auto',{activity:'lunch'}),'lunch');assert.equal(M.activity(2,true),'music');assert.equal(M.activity(12,false,'happy'),'happy');
 const assets=path.join(__dirname,'web/assets/pet/live2d'),catalog=JSON.parse(fs.readFileSync(path.join(assets,'manifest.json')));
 assert.equal(catalog.models.length,5);
 for(const info of catalog.models){
@@ -24,4 +24,4 @@ for(const info of catalog.models){
   for(const ref of [refs.Moc,...refs.Textures,...refs.Expressions.map(x=>x.File),...Object.values(refs.Motions).flat().map(x=>x.File),refs.Physics])assert.ok(fs.statSync(path.join(path.dirname(file),ref)).size>0,ref);
 }
 assert.ok(!fs.readFileSync(path.join(__dirname,'web/companion.js'),'utf8').includes('turnAwayUntil'));
-console.log('Pet 0.3.1: rapid pat thresholds/cooldown, 4 actual window edge placements, time/music states and 5 model reference closures passed.');
+console.log('Pet 0.3.1: rapid pat thresholds/cooldown, 4 actual window edge placements, explicit-context/music states and 5 model reference closures passed.');

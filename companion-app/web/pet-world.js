@@ -35,12 +35,13 @@
       root.style.setProperty('--controls-x',P.clamp(position.x+s.width/2-controls.width/2,8,innerWidth-controls.width-8)+'px');
       const menuY=position.y+s.height+8+controls.height<=innerHeight-8?position.y+s.height+8:position.y-controls.height-8;
       root.style.setProperty('--controls-y',P.clamp(menuY,8,innerHeight-controls.height-8)+'px');
+      window.dispatchEvent(new CustomEvent('xy:pet-layout',{detail:{stage:stage.getBoundingClientRect().toJSON(),bubble:bubble.getBoundingClientRect().toJSON(),resting:bubble.classList.contains('is-resting')}}));
     }
     function hideGuide(){guide.hidden=true;candidate=null;}
     function showGuide(value){
       candidate=value;if(!value){guide.hidden=true;return;}
       guide.hidden=false;const stageSize=size(),r=value.id==='sidebar-space'?{left:value.point.x-stageSize.width/2,right:value.point.x+stageSize.width/2,top:value.point.y-stageSize.height*P.supports.stand,bottom:value.point.y}:value.rect;guide.style.left=Math.max(0,r.left)+'px';guide.style.top=Math.max(0,r.top)+'px';guide.style.width=Math.min(innerWidth,r.right)-Math.max(0,r.left)+'px';guide.style.height=Math.min(innerHeight,r.bottom)-Math.max(0,r.top)+'px';
-      guide.textContent=value.id==='sidebar-space'?'松手站在这里':value.mode==='sit'?'松手坐下':value.mode==='hang'?'松手挂住':'松手躲起来';guide.dataset.edge=value.edge;
+      guide.textContent=value.id==='sidebar-space'?'松手站在这里':value.mode==='sit'?'松手坐下':value.mode==='hang'?'松手挂住':value.mode==='stand'?'松手站在这里':'松手躲起来';guide.dataset.edge=value.edge;
     }
     function detach(){
       if(free)return;const rect=stage.getBoundingClientRect(),outer=root.getBoundingClientRect();homeShape={height:outer.height,dx:rect.left-outer.left,dy:rect.top-outer.top};free=true;document.body.append(root);root.classList.add('pet-free');homeButton.hidden=false;poseButton.hidden=false;place({x:rect.x,y:rect.y});
@@ -68,7 +69,14 @@
         if(progress<1){movement=requestAnimationFrame(step);return;}movement=0;root.classList.remove('is-settling');root.dataset.moving='false';done?.();}
       movement=requestAnimationFrame(step);
     }
+    function rendererDock(value){
+      if(!value||root.dataset.renderer!=='live2d'||!['sit','hang'].includes(value.mode))return value;
+      const mode=value.mode==='sit'?'stand':'peek',edgeY=value.edge==='top'?value.rect.top:value.rect.bottom;
+      const y=edgeY-size().height*P.supports[mode];
+      return y>=6&&y+size().height<=innerHeight-6?{...value,mode}:null;
+    }
     function settle(value,speak=true){
+      value=rendererDock(value)||P.landing(position,size(),[],view());
       cancelAnimationFrame(fall);fall=0;stopMovement();hideGuide();pendingDock=null;dock=value;root.classList.remove('is-lifted','is-falling');clearMask();
       if(!dock)return;
       const r=dock.rect;dock.fraction=dock.fraction??P.clamp((dock.point.x-r.left)/Math.max(1,r.right-r.left),0,1);
@@ -86,7 +94,7 @@
     function chooseDock(point,hide){
       const distances={left:point.x,right:innerWidth-point.x,top:point.y,bottom:innerHeight-point.y},edge=Object.keys(distances).sort((a,b)=>distances[a]-distances[b])[0];
       if(distances[edge]<=(hide?48:28)){const surface=surfaces().find(s=>s.id==='window-edge:'+edge);return {...surface,point,mode:'peek'};}
-      return (!hide&&sidebarDock(point))||P.chooseDock(point,size(),surfaces().filter(s=>!s.id.startsWith('window-edge:')),view(),hide);
+      return rendererDock((!hide&&sidebarDock(point))||P.chooseDock(point,size(),surfaces().filter(s=>!s.id.startsWith('window-edge:')),view(),hide));
     }
     function drop(point,hide){
       const hit=chooseDock(point,hide);if(hit){settle(hit);return;}
@@ -160,14 +168,14 @@
       stopMovement();dock=null;clearMask();setPose('stand');place({x:position.x+dx,y:position.y+dy});save();
     });
     poseButton.addEventListener('click',()=>{
-      if(!dock)return;if(dock.id==='sidebar-space'){onTalk('no-room');return;}const s=size(),r=dock.rect,modes=dock.edge==='left'||dock.edge==='right'?['peek']:['sit','hang','peek'];
+      if(!dock)return;if(root.dataset.renderer==='live2d'){if(dock.mode==='peek'){onTalk('peek');return;}const r=dock.rect;settle({...dock,mode:'peek',point:{x:position.x+size().width/2,y:dock.edge==='top'?r.top:r.bottom}});return;}if(dock.id==='sidebar-space'){onTalk('no-room');return;}const s=size(),r=dock.rect,modes=dock.edge==='left'||dock.edge==='right'?['peek']:['sit','hang','peek'];
       const edgeY=dock.edge==='top'?r.top:r.bottom;
       for(let i=1;i<modes.length;i++){const next=modes[(modes.indexOf(dock.mode)+i)%modes.length],raw=edgeY-s.height*P.supports[next];
         if(raw>=6&&raw+s.height<=innerHeight-6){settle({...dock,mode:next});return;}}
       onTalk('no-room');
     });
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented&&free&&!document.querySelector('dialog[open],.settings-drawer:not([hidden])')){event.preventDefault();home();}});
-    homeButton.addEventListener('click',home);window.addEventListener('resize',queueReflow);document.addEventListener('scroll',queueReflow,true);
+    homeButton.addEventListener('click',home);window.addEventListener('xy:pet-renderer',()=>{if(free){if(dock)settle(dock,false);else queueReflow();}});new ResizeObserver(queueReflow).observe(stage);window.addEventListener('resize',queueReflow);document.addEventListener('scroll',queueReflow,true);
     new MutationObserver(records=>{if(records.some(r=>!root.contains(r.target)&&!guide.contains(r.target)&&r.target!==homeButton))queueReflow();}).observe(document.querySelector('.app-shell'),{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
     // Persist coordinates, not app contents or cursor history. Broken records simply return home.
     try{const saved=JSON.parse(localStorage.getItem('xy.pet.world')||'null');

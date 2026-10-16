@@ -22,7 +22,8 @@
   let selection = 'auto', busy = false, revision = 0;
   const known = [
     {id: 'qwen3-4b-q4_k_m', label: 'Qwen3 4B · Q4_K_M'},
-    {id: 'qwen3-8b-q4_k_m', label: 'Qwen3 8B · Q4_K_M'}
+    {id: 'qwen3-8b-q4_k_m', label: 'Qwen3 8B · Q4_K_M'},
+    {id: 'gemma3-4b-it-q4_0', label: 'Gemma 3 4B · Q4_0（文本与看图）'}
   ];
   function controls() { select.disabled = busy || !select.options.length; release.disabled = busy; refresh.disabled = busy; }
   async function load() {
