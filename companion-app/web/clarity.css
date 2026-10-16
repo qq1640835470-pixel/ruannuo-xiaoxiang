@@ -1,0 +1,25 @@
+@charset "UTF-8";
+/* Keep the blue palette while giving Chinese text a clear native UI face. */
+:root{font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;--muted:#596e8c}
+body{font-weight:400;text-rendering:optimizeLegibility}
+button,input,textarea,select{font-family:inherit}
+.message-text{color:var(--ink);font-weight:400}
+.pet-bubble-heading{font-size:11px;color:#526b8b}
+.pet-bubble p{font-size:13px;line-height:1.75;color:#405470}
+.pet-controls button{font-size:12px;color:#405a7b}
+.toggle-row small,.muted-text,.privacy-note,.composer-footer>span,.message-time{color:#596e8c}
+#pet-canvas{width:100%;height:100%;filter:none;image-rendering:auto}
+/* The atlas is cropped by layout: no additional image or external request. */
+.message-avatar.sakiko-avatar{display:block;overflow:hidden;background-color:#e4edf8;background-image:url('/sakiko-chibi-atlas.png');background-repeat:no-repeat;background-size:179px 175px;background-position:-31px -7px;width:36px;height:36px;border-radius:13px;color:transparent;font-size:0;border:1px solid #c6d7ed}
+@media(max-width:600px){.message-avatar.sakiko-avatar{width:32px;height:32px;background-size:159px 156px;background-position:-28px -6px;border-radius:11px}.pet-bubble p{font-size:12px}}
+
+/* Keep scrolling within the active panel, including short and narrow windows. */
+html,body{width:100%;height:100%;overflow:hidden}
+.app-shell{height:100dvh;min-height:0;overflow:hidden}
+.app-shell>main{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.topbar{flex-shrink:0}.chat-page{height:auto;flex:1;min-height:0;overflow:hidden}.conversation{min-height:0;overflow:auto}.plan-page{flex:1;min-height:0;overflow:auto}
+#global-error{flex-shrink:0;max-height:25dvh;overflow:auto}.drawer-header{flex-shrink:0}.drawer-body{min-height:0;overscroll-behavior:contain}
+.message-retry{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.message-retry small{font-size:12px;line-height:1.6;color:var(--muted)}
+.settings-section small,.cost-notice,.privacy-note{font-size:12px;line-height:1.7}
+@media(max-width:600px){.app-shell{display:flex;flex-direction:column}.sidebar{flex-shrink:0}.app-shell>main{flex:1;height:auto;min-height:0}.topbar{min-height:64px}.composer textarea{resize:none;max-height:25dvh}.header-tools{min-width:0}.topbar .eyebrow{font-size:11px}.clock-panel{min-width:0}}
+@media(max-height:580px) and (min-width:601px){.sidebar{overflow:hidden}.sidebar nav{margin-top:12px}.pet:not(.pet-free){margin:8px 0}.pet:not(.pet-free) .pet-bubble{display:none}.pet:not(.pet-free) .pet-stage{height:105px;width:86px}.pet:not(.pet-free) .pet-controls{gap:2px}.pet-controls button{font-size:10px;padding:3px}.sidebar-bottom .settings-button{padding:7px 4px}.brand{font-size:18px}.brand-mark{width:28px;height:28px}.sidebar{padding-top:14px;padding-bottom:12px}}

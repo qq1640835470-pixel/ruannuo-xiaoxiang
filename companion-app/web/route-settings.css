@@ -1,0 +1,11 @@
+#route-settings { margin: 12px 0; border: 1px solid var(--border, #d9dbe6); border-radius: 12px; padding: 12px; }
+#route-settings > summary { cursor: pointer; font-weight: 600; }
+#route-settings p { font-size: 13px; line-height: 1.65; }
+#route-settings label { display: grid; gap: 6px; margin: 10px 0; font-size: 13px; }
+#route-settings input:not([type=checkbox]), #route-settings select { box-sizing: border-box; width: 100%; min-height: 36px; border: 1px solid var(--border, #d9dbe6); border-radius: 8px; padding: 7px 9px; color: inherit; background: var(--panel, #fff); }
+#route-settings .route-check { display: flex; align-items: center; }
+#route-settings .route-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#route-settings button { cursor: pointer; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border, #d9dbe6); }
+#route-settings button:disabled { opacity: .55; cursor: wait; }
+#route-settings .route-help { opacity: .75; }
+#route-result { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.7; max-height: 420px; overflow-y: auto; }

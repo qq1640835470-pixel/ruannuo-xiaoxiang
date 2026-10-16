@@ -1,0 +1,2 @@
+pywebview==6.2.1; platform_system == "Windows"
+Pillow>=10,<13

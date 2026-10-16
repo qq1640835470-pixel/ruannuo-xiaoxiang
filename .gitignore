@@ -1,0 +1,22 @@
+# Local user data and credentials
+companion-data/
+**/*.dpapi
+**/*.sqlite*
+**/.env*
+**/*cookie*
+**/*token*
+# Downloaded/runtime dependencies
+**/.runtime/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/*.gguf
+**/*.part
+# Local logs, snapshots and private diagnostic outputs
+checkpoints/
+**/.checkpoints/
+**/artifacts/
+**/logs/
+api-hub/latest.json
+api-hub/google-observation.json
+api-hub/balances.html

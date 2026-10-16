@@ -1,0 +1,9 @@
+.pet-music{position:fixed;z-index:160;width:224px;max-width:calc(100vw - 16px);padding:5px;border:1px solid #cbd9ec;border-radius:16px;background:rgba(248,251,255,.97);box-shadow:0 5px 18px #59769926;color:#314866;font-size:12px}
+.pet-music[hidden],.pet-music [hidden]{display:none!important}
+.pet-music button{font:inherit;color:inherit;cursor:pointer}
+.pet-music-summary{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;border:0;background:transparent;padding:5px 8px;border-radius:10px}
+.pet-music button:focus-visible{outline:2px solid #6a96c9;outline-offset:1px}
+.pet-music-controls{padding:6px}.pet-music-buttons{display:flex;gap:5px}.pet-music-buttons button,.pet-music-choose{border:1px solid #cbd9ec;border-radius:8px;background:#fff;padding:5px 7px}
+.pet-music-controls label{display:flex;align-items:center;gap:7px;margin:10px 0}.pet-music-controls input{width:150px;min-width:0;accent-color:#7195c5}.pet-music-choose{width:100%}
+.music-search-form{display:flex;gap:8px;margin:12px 0}.music-search-form input{flex:1;min-width:0;padding:9px;border:1px solid #cbd9ec;border-radius:10px;font:inherit}.music-search-form button{white-space:nowrap}
+#music-search-results{max-height:220px;overflow:auto}
