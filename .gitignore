@@ -20,3 +20,12 @@ checkpoints/
 api-hub/latest.json
 api-hub/google-observation.json
 api-hub/balances.html
+
+# Explicit private handoff material: never publish
+**/private_user_profile.md
+**/private_user_profile.*
+**/handoff-backups/
+**/speech-cache/
+**/workspace-app-profile/
+**/workspace-remote-profile/
+**/local_adaptation.json
