@@ -40,7 +40,7 @@
     const old=active;active=null;old.controller.abort();old.audio?.pause();
     if(old.button){old.button.textContent='▷ 生成语音';old.button.setAttribute('aria-pressed','false');}
     const button=document.querySelector('#speech-stop');if(button)button.hidden=true;
-    if(old.music)old.music.volume=old.volume;
+    if(old.music)window.XYMusic?.setDucked(false);
   }
   async function speak(text,button,trigger='manual'){
     if(active?.text===text){stop();return;}
@@ -52,7 +52,7 @@
       if(active!==item)return;if(!result.url){stop();return;}
       item.audio=new Audio(result.url);
       const music=document.querySelector('#music-audio');
-      if(music&&!music.paused){item.music=music;item.volume=music.volume;music.volume=Math.min(music.volume,.15);}
+      if(music&&window.XYMusic){item.music=music;window.XYMusic.setDucked(true);}
       item.audio.onended=()=>{if(active===item)stop();};item.audio.onerror=()=>{if(active===item){voiceStatus.textContent='音频播放失败，可点击生成语音重试。';stop();}};
       if(button)button.textContent='■ 停止语音';
       await item.audio.play();

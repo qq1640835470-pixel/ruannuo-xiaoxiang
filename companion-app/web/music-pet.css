@@ -1,4 +1,5 @@
-.pet-music{position:fixed;z-index:160;width:258px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);box-sizing:border-box;overflow:auto;padding:6px;border:1px solid #cbd9ec;border-radius:16px;background:rgba(248,251,255,.97);box-shadow:0 5px 18px #59769926;color:#314866;font-size:14px}
+.pet-music{position:fixed;z-index:160;width:180px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);box-sizing:border-box;overflow:auto;padding:3px;border:1px solid #cbd9ec;border-radius:16px;background:rgba(248,251,255,.97);box-shadow:0 5px 18px #59769926;color:#314866;font-size:14px}
+.pet-music.is-expanded{width:258px;padding:6px}
 .pet-music[hidden],.pet-music [hidden]{display:none!important}
 .pet-music button{font:inherit;color:inherit;cursor:pointer;min-height:34px}
 .pet-music-summary{display:block;width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;border:0;background:transparent;padding:6px 8px;border-radius:10px}

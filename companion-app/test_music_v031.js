@@ -1,8 +1,8 @@
 'use strict';
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const nodes=new Map(),listeners={},events=[],calls=[],revoked=[];
+const nodes=new Map(),listeners={},events=[],calls=[],revoked=[],saved=new Map();
 class Node {
-  constructor(){this.children=[];this.handlers={};this.value='';this.paused=true;this.ended=false;this.volume=1;this.attrs={};}
+  constructor(){this.children=[];this.handlers={};this.value='';this.paused=true;this.ended=false;this.volume=1;this.attrs={};this.dataset={};this.classList={toggle(){}};}
   addEventListener(name,fn){(this.handlers[name]??=[]).push(fn);}
   emit(name,event={}){for(const fn of this.handlers[name]||[])fn(event);}
   click(){this.emit('click');}
@@ -22,8 +22,12 @@ class Node {
   load(){this.emit('emptied');}
 }
 const select=s=>{if(!nodes.has(s))nodes.set(s,new Node());return nodes.get(s);};
-const context=vm.createContext({console,localStorage:{getItem:()=>null,setItem(){}},document:{querySelector:select,querySelectorAll:()=>[],createElement:()=>new Node(),createTextNode:text=>text,documentElement:{style:{setProperty(){}},dataset:{}}},window:{addEventListener:(name,fn)=>{(listeners[name]??=[]).push(fn);},dispatchEvent:e=>{events.push(e);for(const fn of listeners[e.type]||[])fn(e);}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},setTimeout,clearTimeout,URL:{createObjectURL:f=>'blob:'+f.name,revokeObjectURL:url=>revoked.push(url)},fetch:async path=>{calls.push(path);return {ok:true,json:async()=>path.includes('/url?')?{available:true,url:'https://m10.music.126.net/fixture.mp3'}:{preferences:{},permissions:[]}};}});
+const context=vm.createContext({console,localStorage:{getItem:key=>saved.get(key)??null,setItem:(key,value)=>saved.set(key,value)},document:{querySelector:select,querySelectorAll:()=>[],createElement:()=>new Node(),createTextNode:text=>text,documentElement:{style:{setProperty(){}},dataset:{}}},window:{addEventListener:(name,fn)=>{(listeners[name]??=[]).push(fn);},dispatchEvent:e=>{events.push(e);for(const fn of listeners[e.type]||[])fn(e);}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},setTimeout,clearTimeout,URL:{createObjectURL:f=>'blob:'+f.name,revokeObjectURL:url=>revoked.push(url)},fetch:async path=>{calls.push(path);return {ok:true,json:async()=>path.includes('/url?')?{available:true,url:'https://m10.music.126.net/fixture.mp3'}:{preferences:{},permissions:[]}};}});
 vm.runInContext(fs.readFileSync('web/workspace-tools.js','utf8'),context);
+assert.equal(select('#music-audio').volume,0.4);
+context.window.XYMusic.setVolume(0.6);assert.equal(saved.get('xy.music-volume'),'0.6');
+context.window.XYMusic.setDucked(true);assert.equal(select('#music-audio').volume,0.15);assert.equal(context.window.XYMusic.getVolume(),0.6);
+context.window.XYMusic.setDucked(false);assert.equal(select('#music-audio').volume,0.6);
 const dispatch=(type,detail)=>{for(const fn of listeners[type]||[])fn({detail});};const flush=()=>new Promise(r=>setImmediate(r));const latest=()=>events.filter(e=>e.type==='xy:music-state').at(-1).detail;
 (async()=>{
   select('#music-files').emit('change',{target:{files:[{name:'local.mp3'}]}});assert.equal(select('#music-list').children.length,1);

@@ -1,15 +1,16 @@
 # 软糯小祥 · 项目交接
 
-更新：2026-10-17（GitHub 文档同步）
+更新：2026-10-17（前端源码与交接同步）
 
 ## 0. 当前范围与状态
-**最新授权仅同步安全项目文档及必要的 .gitignore 规则到 GitHub main。** 不同步未验收程序代码，不启动服务来冒充验收，不清理或覆盖私人数据库，不恢复QQ发送任务；此后每次只处理一个明确任务，更新交接文档后停止。
+**本次按用户明确指令同步六个前端文件、两份相关测试及安全交接文档到 GitHub main。** 此同步不等于发布或用户体验验收；不清理或覆盖私人数据库，不恢复QQ发送任务。此后每次只处理一个明确任务，更新交接文档后停止。
 
 - 实际运行源码：D:/StudyLifePlan/companion-app，无.git；统一数据：D:/StudyLifePlan/companion-data。
-- Git导出工作副本：D:/StudyLifePlan/github-export/ruannuo-xiaoxiang；文档同步前基线 HEAD=f08773f55b0e3d1e12715a8f56492f6b15693286（0.3.3）。用户选择公开仓库；文档同步后的提交以 Git 记录为准。
+- Git导出工作副本：D:/StudyLifePlan/github-export/ruannuo-xiaoxiang；用户选择公开仓库。本次同步后的提交以 Git 记录为准，运行目录没有 `.git`，后续两处改动需核对后同步。
 - server.py声明VERSION=0.3.3；实际源码为0.3.3基线+反馈596d20ab未验收前端改动，不应称为已发布0.3.4。
-- 本轮检查127.0.0.1:18764/api/health未响应，仅证明检查当时未连通，未进一步诊断或重启。
-- 与Git导出基线不同的6个文件：web/activity-speech-settings.js、web/music-pet.css、web/music-pet.js、web/workspace-tools.js、web/assets/pet/xiaoxiang-cursor-link.svg、web/assets/pet/xiaoxiang-cursor.svg。它们已备份，不丢弃、不覆盖。现有导出副本没有自动同步这些WIP改动。
+- 前端六个文件已复制并核对哈希：web/activity-speech-settings.js、web/music-pet.css、web/music-pet.js、web/workspace-tools.js、web/assets/pet/xiaoxiang-cursor-link.svg、web/assets/pet/xiaoxiang-cursor.svg。另同步 test_music_v031.js 和 test_music_layout_v033.cjs。
+- 缩小音乐气泡、默认及记忆音乐音量、语音临时压低与恢复、两个 SVG 光标通过定向夹具与解析。前端撤下了后端不支持的多语言选择及翻译承诺；多语言语音尚未实现。
+- 用户在本机关闭了普通主聊的按任务提供方路由；个人设置值不进入仓库。朗读跳过 `*` 和聊天附件入口尚未实现。
 
 ## 1. 软件架构与数据流
 - Python本机HTTP服务：server.py，127.0.0.1:18764；launch.py/restart_local.py用于识别本项目服务后启动/更新，不能关闭别的进程。
@@ -33,16 +34,16 @@
 
 ## 3. 未完成反馈596d20ab（不得伪装已解决）
 1. 地点模糊查询：用户对话出现学校/车站唯一匹配失败；普通maps_service仍使用Photon，与已配高德不一致。分析提出的官方POI候选方案未落盘完成。
-2. 缩小音乐气泡：前端有试改，未验收。
+2. 缩小音乐气泡：前端改动已通过定向 Edge 夹具；用户实际界面体验待确认。
 3. “聊聊这首歌”使用对话选定模型：后端仍固定本地模型，未修改。
-4. 中/日/粤/英语音：前端出现语言选项和language请求字段，但speech_service/backend尚未消费，不能宣称语言切换生效。Fish的language字段只影响规范化，不等于强制口音；翻译/音色方案未实施。
-5. 小小祥光标更可爱：SVG已试改，未验收。
+4. 中/日/粤/英语音：撤下未生效的前端选项及翻译承诺；翻译/音色方案未实施。
+5. 小小祥光标更可爱：SVG 已更新并通过 XML 解析及 Edge 指针切换夹具；视觉体验待用户确认。
 6. xy读“叉歪”：尚未接入语音发音处理。
-7. 默认适中音量并记忆：前端有试改，尚未验收；需验证临时语音duck不污染持久音量。
+7. 默认适中音量并记忆：前端默认 40%，本机记忆及临时语音压低后恢复已通过定向夹具；用户体验待确认。
 8. “随便播放几首钢琴曲”：已查相关对话，存在只口头答应/错误否认播放器能力；明确命令正则过窄，风格推荐/队列逻辑未实现。
 9. 聊天框图片/文件附件按钮：未实现；现有仅工具页单图入口，不等于通用聊天附件。
 
-上一轮子代理额度中断，没有完成整体验收。本次仅同步文档，不接着改这些功能。
+上一轮子代理额度中断，没有完成整体验收。本次只同步已明确处理的前端文件与相关测试，不接着改其他功能。
 
 ## 4. 日志、反馈与私人数据
 - companion-data/companion-v01/assistant.sqlite3：聊天、任务、反馈、反馈发送状态、暂存与本地草稿备份、预算/用量、请求回执等。不得重建、覆盖、清零或上传。
@@ -58,10 +59,10 @@ feedback_bridge.py的THREAD_ID常量固定绑定旧Codex聊天；通过codex que
 
 ## 5. 测试证据与限制
 0.3.3历史记录为128项Python回归通过、音乐/宠物真实Edge夹具与5套Live2D加载通过；双地图真实路线、Fish免费型号、Gemma文字与图像/HTTP曾实测。证据原机companion-app/artifacts/及feedback-43ca7c7a-progress.md等，不随公开源码上传。
-当前6个WIP前端文件未完成整体验收，不能继承基线测试结论。此前交接备份核查了哈希、SQLite一致性、Git路径/历史隐私、文档一致性与反馈通道；本次文档同步仅核对目录差异、待提交文件和隐私排除规则，未运行应用开发测试、安装依赖或启动API。
+六个前端文件未完成实际应用的用户体验验收，不能继承基线测试结论。本次已执行音乐及宠物定向 Edge 夹具、JS 语法与 SVG XML 检查；未调用付费模型或语音接口。同步前核对了目录差异、待提交文件和隐私排除规则。
 Windows DPAPI、WebView2、进程行为与显卡必须在Windows实测；Cloud/Linux静态检查不能替代。尚无手机/手表同步、支付闭环、全系统操作、自主改源码、健康分析或夜间常驻云任务。未来愿景见VISION.md。
 
 ## 6. 恢复与下一次工作
 本地完整备份位置见D:/StudyLifePlan/handoff-backups/latest.json；含源代码WIP、api-hub、全部companion-data（包括模型/日志/反馈/加密状态）、一致性数据库快照与Git bundle。该目录为私人备份，绝不能push。
 恢复只在新的独立目录中进行，先验证manifest与数据库integrity_check；不要覆盖原私人数据库或原文件。恢复后再由用户验收，必要时重新登录；详情见备份内RESTORE.md。
-先读本 HANDOFF、VISION、AGENTS 及本轮交接清单。GitHub 文档同步不代表 WIP 验收或发布；运行目录的6个前端改动仍未同步。下一次只按用户明确指定的一项任务继续，完成后更新交接文档并停止。
+先读本 HANDOFF、VISION、AGENTS 及本轮交接清单。GitHub 源码同步不代表 WIP 验收或发布；下一次只按用户明确指定的一项任务继续，完成后更新交接文档并停止。

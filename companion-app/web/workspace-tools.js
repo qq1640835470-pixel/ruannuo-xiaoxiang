@@ -23,6 +23,14 @@
   let browserTimer;
   $('#browser-form').addEventListener('submit',async e=>{e.preventDefault();const b=$('#browser-go'),status=$('#browser-status');b.disabled=true;clearTimeout(browserTimer);try{const d=await call('/api/browser/open',{url:$('#browser-url').value});status.textContent=d.detail;$('#workspace-dialog').close();let checks=0;async function poll(){try{const s=await call('/api/browser/status?id='+encodeURIComponent(d.id));status.textContent=s.detail;if(['failed','loaded','closed'].includes(s.status)||++checks>=20){b.disabled=false;return;}browserTimer=setTimeout(poll,1000);}catch(e){status.textContent=e.message;b.disabled=false;}}browserTimer=setTimeout(poll,800);}catch(e){status.textContent=e.message;b.disabled=false;}});
   let tracks=[],active=-1,playRevision=0;const audio=$('#music-audio'),list=$('#music-list'),status=$('#music-status');
+  let preferredVolume=.4,ducked=false;
+  try{const saved=localStorage.getItem('xy.music-volume');if(saved!==null&&saved.trim()!==''&&Number.isFinite(Number(saved)))preferredVolume=Math.max(0,Math.min(1,Number(saved)));}catch{}
+  const effectiveVolume=()=>ducked?Math.min(preferredVolume,.15):preferredVolume;
+  function applyVolume(){audio.volume=effectiveVolume();window.dispatchEvent(new CustomEvent('xy:music-volume',{detail:{volume:preferredVolume,ducked}}));}
+  function setVolume(value){if(!Number.isFinite(Number(value)))return;preferredVolume=Math.max(0,Math.min(1,Number(value)));try{localStorage.setItem('xy.music-volume',String(preferredVolume));}catch{}applyVolume();}
+  function setDucked(value){ducked=!!value;applyVolume();}
+  audio.addEventListener('volumechange',()=>{if(!ducked&&Math.abs(audio.volume-preferredVolume)>.00001)setVolume(audio.volume);});
+  applyVolume();
   function label(track){return track.name+(track.artists?' — '+track.artists:'');}
   const commentary=document.createElement('button');commentary.type='button';commentary.className='subtle-button';commentary.textContent='聊聊这首歌';commentary.disabled=true;
   const commentResult=document.createElement('p');commentResult.className='music-commentary';commentResult.setAttribute('role','status');
@@ -38,7 +46,7 @@
   window.addEventListener('xy:music-select',e=>{const track=e.detail;if(!track?.remote||!track.id)return;let index=tracks.findIndex(t=>t.remote&&String(t.id)===String(track.id));if(index<0){tracks.push(track);index=tracks.length-1;}play(index);});
   $('#music-prev').addEventListener('click',()=>play(active<0?0:active-1));$('#music-next').addEventListener('click',()=>play(active+1));audio.addEventListener('ended',()=>play(active+1));audio.addEventListener('error',()=>{status.textContent=tracks[active]?.remote?'平台音源暂时无法播放，请重选歌曲获取播放地址。':'此文件无法播放，请尝试MP3/WAV或其他编码。';publish();});
   for(const event of ['play','pause','ended','emptied'])audio.addEventListener(event,publish);
-  window.XYMusic={previous:()=>play(active<0?0:active-1),next:()=>play(active+1),toggle:async()=>{if(active<0){await play(0);return;}if(audio.paused){if(!audio.getAttribute('src')||audio.error){await play(active);return;}try{await audio.play();}catch(e){status.textContent='音乐未能播放：'+e.message;}}else audio.pause();},state:()=>publish()};
+  window.XYMusic={getVolume:()=>preferredVolume,setVolume,setDucked,previous:()=>play(active<0?0:active-1),next:()=>play(active+1),toggle:async()=>{if(active<0){await play(0);return;}if(audio.paused){if(!audio.getAttribute('src')||audio.error){await play(active);return;}try{await audio.play();}catch(e){status.textContent='音乐未能播放：'+e.message;}}else audio.pause();},state:()=>publish()};
   window.addEventListener('pagehide',()=>{clearTimeout(browserTimer);clear();});
   let backupTimer;window.addEventListener('xy-feedback-change',()=>{clearTimeout(backupTimer);backupTimer=setTimeout(()=>{const snapshot=window.XYFeedback?.exportSnapshot();if(snapshot)call('/api/feedback-local',snapshot).catch(()=>{const node=$('#feedback-status');if(node)node.textContent='草稿仍在当前浏览器，本机备份暂未成功。';});},400);});$('#feedback-restore')?.addEventListener('click',async()=>{try{const snapshot=await call('/api/feedback-local');const n=window.XYFeedback?.importSnapshot(snapshot);$('#feedback-status').textContent='已合并本机备份，当前编辑和已有反馈保留。';}catch(e){$('#feedback-status').textContent=e.message;}});$('#feedback-button').addEventListener('click',()=>window.dispatchEvent(new Event('xy-feedback-change')));window.addEventListener('xy:settings',load);load();
 })();
