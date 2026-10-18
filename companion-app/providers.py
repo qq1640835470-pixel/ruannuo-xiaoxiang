@@ -1,7 +1,7 @@
 """Real HTTP model adapters. Never log secrets or raw API error bodies."""
 from __future__ import annotations
 import app_paths
-import datetime as dt, importlib.util, json, pathlib, urllib.request, urllib.error, urllib.parse, time, os, re, threading
+import datetime as dt, importlib.util, json, pathlib, urllib.request, urllib.error, urllib.parse, time, os, re, threading, math
 from dataclasses import dataclass
 from connectors import TOOLS
 from local_features import LOCAL_TOOL
@@ -14,7 +14,7 @@ import runtime_log,persistent_memory
 spec=importlib.util.spec_from_file_location('balance_hub',pathlib.Path(__file__).resolve().parents[1]/'api-hub'/'hub.py')
 hub=importlib.util.module_from_spec(spec);spec.loader.exec_module(hub)
 hub.VAULT=app_paths.HOME/'secrets'/'providers.dpapi'
-MODELS={'gemini':'gemini-3.1-flash-lite','deepseek':'deepseek-flash'}
+MODELS={'gemini':'gemini-3.1-flash-lite','deepseek':'deepseek-flash','openrouter':''}
 # Conservative accounting coefficients for a 10 CNY experiment, not a bank FX rate.
 PRICES={'gemini':(.25*10,1.50*10),'deepseek':(.30*10,1.20*10)}
 SOURCE_DATE='2026-10-16'
@@ -38,6 +38,7 @@ class ModelAdapter:
 ADAPTERS={
     'gemini':ModelAdapter('gemini','gemini_generate_content','https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',True),
     'deepseek':ModelAdapter('deepseek','openai_chat_completions','https://api.deepseek.com/chat/completions',True),
+    'openrouter':ModelAdapter('openrouter','openai_chat_completions','https://openrouter.ai/api/v1/chat/completions',True),
     'openai':ModelAdapter('openai','openai_responses'),
     'claude':ModelAdapter('claude','anthropic_messages'),
     'glm':ModelAdapter('glm','openai_compatible')}
@@ -94,11 +95,31 @@ CATALOG_PATH=app_paths.DATA/'model-catalogue.json'
 CATALOG_LOCK=threading.RLock()
 CATALOG_TTL=86400
 CATALOG_URLS={'gemini':'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
-              'deepseek':'https://api.deepseek.com/models'}
+              'deepseek':'https://api.deepseek.com/models','openrouter':'https://openrouter.ai/api/v1/models'}
 CATALOG_NOTE='提供方列出的文本候选，未逐一验证调用权限、工具能力或价格。Fish Audio仅用于语音，不参与文字模型选择。'
 
 def valid_model_id(value):
     return isinstance(value,str) and bool(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}',value))
+
+def valid_openrouter_id(value):
+    return isinstance(value,str) and bool(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?::[A-Za-z0-9._-]{1,32})?',value)) and '..' not in value and not re.search(r'sk-|AIza|Bearer',value,re.I)
+
+def openrouter_model(model):
+    try:
+        cache=json.loads(CATALOG_PATH.read_text(encoding='utf-8'))
+        return next((r for r in cache.get('openrouter',{}).get('models',[]) if r['id']==model),{})
+    except (OSError,ValueError):return {}
+
+def provider_error_message(exc):
+    if isinstance(exc,ProviderHTTPError):
+        return {401:'认证失败，请重新配置本机 API Key。',403:'访问被拒绝，请检查模型权限或地区限制。',
+                402:'OpenRouter 额度不足，请在平台核对余额或 Key 限额。',404:'模型不存在或已下线，请刷新列表并核对模型 ID。',
+                400:'请求参数、模型 ID 或上下文不受支持，请核对所选模型。',408:'模型请求超时。',
+                429:'请求受限，请稍后重试。',502:'模型上游服务失败。',503:'模型暂不可用。',504:'模型服务超时。'}.get(exc.code,'模型服务返回错误。')
+    if isinstance(exc,TimeoutError):return '模型请求超时，结果与用量未知。'
+    if isinstance(exc,urllib.error.URLError):return '模型网络连接失败，结果与用量未知。'
+    if isinstance(exc,ValueError):return str(exc)
+    return '模型响应无法核对，请检查本机凭据与提供方状态。'
 
 def normalize_models(provider,data):
     rows=data.get('models' if provider=='gemini' else 'data',[])
@@ -106,6 +127,22 @@ def normalize_models(provider,data):
     models={}
     for row in rows:
         if not isinstance(row,dict):continue
+        if provider=='openrouter':
+            model=row.get('id')
+            if not valid_openrouter_id(model):continue
+            architecture=row.get('architecture') or {}
+            if 'text' not in architecture.get('input_modalities',[]) or 'text' not in architecture.get('output_modalities',[]):continue
+            params=row.get('supported_parameters') or []
+            raw_pricing=row.get('pricing') or {}
+            pricing={k:v for k,v in raw_pricing.items() if k in ('prompt','completion') and hub.number(v) is not None and float(v)>=0}
+            if raw_pricing.get('overrides') or any(hub.number(raw_pricing.get(k)) not in (None,'0','0.0') for k in ('request','image','web_search')):pricing={}
+            top=row.get('top_provider') or {}
+            models[model]={'id':model,'label':str(row.get('name') or model)[:128],
+                'context_length':top.get('context_length') or row.get('context_length'),
+                'max_completion_tokens':top.get('max_completion_tokens'),
+                'supported_parameters':[p for p in params if p in ('max_tokens','max_completion_tokens','response_format','structured_outputs','tools','tool_choice')],
+                'pricing':pricing,'protective_estimate_available':False,'tools_adapted':False}
+            continue
         model=row.get('name','').removeprefix('models/') if provider=='gemini' else row.get('id','')
         if not valid_model_id(model):continue
         if provider=='gemini':
@@ -126,13 +163,15 @@ def model_catalogue(provider,refresh=False):
         if refresh:
             attempted=dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
             try:
-                key=hub.load_keys()[provider]
                 headers={'Accept':'application/json','User-Agent':'StudyLifeAssistant/0.2'}
-                headers['x-goog-api-key' if provider=='gemini' else 'Authorization']=key if provider=='gemini' else 'Bearer '+key
+                if provider!='openrouter':
+                    key=hub.load_keys()[provider]
+                    headers['x-goog-api-key' if provider=='gemini' else 'Authorization']=key if provider=='gemini' else 'Bearer '+key
                 req=urllib.request.Request(CATALOG_URLS[provider],headers=headers,method='GET')
                 with urllib.request.build_opener(hub.NoRedirect()).open(req,timeout=20) as response:
-                    raw=response.read(1024*1024+1)
-                    if len(raw)>1024*1024:raise ValueError('模型列表过大')
+                    limit=8*1024*1024 if provider=='openrouter' else 1024*1024
+                    raw=response.read(limit+1)
+                    if len(raw)>limit:raise ValueError('模型列表过大')
                     data=json.loads(raw)
                 record={'models':normalize_models(provider,data),'fetched_at':attempted,'attempted_at':attempted,
                         'status':'listed','partial':bool(data.get('nextPageToken'))}
@@ -144,13 +183,16 @@ def model_catalogue(provider,refresh=False):
             temporary=CATALOG_PATH.with_suffix('.tmp');temporary.write_text(json.dumps(cache,ensure_ascii=False),encoding='utf-8');temporary.replace(CATALOG_PATH)
         fetched=record.get('fetched_at')
         stale=not fetched or (dt.datetime.now(dt.timezone.utc)-dt.datetime.fromisoformat(fetched)).total_seconds()>CATALOG_TTL
-        rows=[{**r,'protective_estimate_available':model_rates(provider,r['id']) is not None,'tools_adapted':r['id'] in TOOL_MODELS[provider]} for r in record.get('models',[])]
+        rows=[{**r,'protective_estimate_available':model_rates(provider,r['id']) is not None,'tools_adapted':r['id'] in TOOL_MODELS.get(provider,set())} for r in record.get('models',[])]
         return {'provider':provider,'models':rows,'status':record.get('status','not_fetched'),
                 'fetched_at':fetched,'attempted_at':record.get('attempted_at'),'stale':stale,
                 'partial':record.get('partial',False),'http_status':record.get('http_status'),
-                'note':CATALOG_NOTE,'defaults':{'chat':MODELS[provider],'pet':PET_MODELS[provider]}}
+                'note':CATALOG_NOTE,'defaults':{'chat':MODELS[provider],'pet':PET_MODELS.get(provider,'')}}
 
 def validate_model(provider,model):
+    if provider=='openrouter':
+        if not valid_openrouter_id(model):raise ValueError('OpenRouter 请填写准确的厂商/型号 ID（可含 :free）；显示名称不可用。')
+        return model
     if provider not in MODELS or not valid_model_id(model):raise ValueError('模型型号无效')
     allowed={MODELS[provider],PET_MODELS[provider]}|{row['id'] for row in model_catalogue(provider)['models']}
     if model not in allowed:raise ValueError('请先读取提供方模型列表，再选择列表中的型号')
@@ -158,6 +200,12 @@ def validate_model(provider,model):
 
 def model_rates(provider,model):
     if provider=='local':return (0,0)
+    if provider=='openrouter':
+        pricing=openrouter_model(model).get('pricing',{})
+        if set(pricing)=={'prompt','completion'}:
+            rates=tuple(float(pricing[k])*1000000*10 for k in ('prompt','completion'))
+            if all(math.isfinite(r) and r>=0 for r in rates):return rates
+        return None
     if model in ADDITIONAL_RATES.get(provider,{}):return ADDITIONAL_RATES[provider][model]
     if model==MODELS.get(provider):return PRICES[provider]
     if model==PET_MODELS.get(provider):return PET_PRICES[provider]
@@ -187,8 +235,13 @@ def post(url,key,body,provider,extra=None,binary=False):
             if binary:
                 if not resp.headers.get_content_type().startswith('audio/'): raise ValueError('没有返回音频')
                 return data
-            return json.loads(data)
+            result=json.loads(data)
+            if provider=='openrouter' and isinstance(result,dict) and 'error' in result:
+                code=result['error'].get('code',502)
+                raise ProviderHTTPError(provider,code if isinstance(code,int) else 502,{'category':'provider_response_error'})
+            return result
     except urllib.error.HTTPError as exc:
+        if isinstance(exc,ProviderHTTPError):raise
         diagnostic=safe_error(provider,exc.code,exc.read(65536))
         raise ProviderHTTPError(provider,exc.code,diagnostic) from None
 
@@ -210,8 +263,13 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
         return local_runtime.chat(history,context,companion=companion,model=model,tools=TOOLS if allow_tools else [])
     adapter=ADAPTERS.get(provider)
     if not adapter or not adapter.enabled:raise ValueError('模型提供方不支持或尚未配置')
-    model=validate_model(provider,model or (PET_MODELS if companion else MODELS)[provider]);keys=hub.load_keys()
-    tools_enabled=allow_tools and not companion and model in TOOL_MODELS[provider]
+    model=validate_model(provider,model or (PET_MODELS if companion else MODELS)[provider])
+    try:keys=hub.load_keys()
+    except Exception:
+        if provider=='openrouter':raise ValueError('请在设置中按 OpenRouter 凭据说明配置本机 DPAPI Key。') from None
+        raise
+    if provider=='openrouter' and not keys.get(provider):raise ValueError('请在设置中按 OpenRouter 凭据说明配置本机 DPAPI Key。')
+    tools_enabled=allow_tools and not companion and model in TOOL_MODELS.get(provider,set())
     # A small fixed context prevents growth in cost and exposure. Tools carry no raw files.
     hist=[];budget=12000
     for m in reversed(history[-10:]):
@@ -247,21 +305,42 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
     else:
         body={'model':model,'messages':[{'role':'system','content':prompt}]+hist,
               'max_tokens':max_output_tokens or (256 if companion else 1536)}
-        if model in (MODELS['deepseek'],PET_MODELS['deepseek']):body['thinking']={'type':'disabled'}
+        if provider=='deepseek' and model in (MODELS['deepseek'],PET_MODELS['deepseek']):body['thinking']={'type':'disabled'}
         if tools_enabled:body['tools']=[{'type':'function','function':t} for t in TOOLS]
+        if provider=='openrouter':
+            metadata=openrouter_model(model);params=metadata.get('supported_parameters',[])
+            output=body.pop('max_tokens')
+            if metadata and not any(p in params for p in ('max_tokens','max_completion_tokens')):
+                raise ValueError('此模型未声明输出长度参数支持，请更换模型或刷新列表。')
+            limit=metadata.get('max_completion_tokens')
+            if isinstance(limit,int) and output>limit:raise ValueError('所选模型输出长度上限不足，请换用支持更长输出的模型。')
+            context_limit=metadata.get('context_length')
+            upper=len(json.dumps(body['messages'],ensure_ascii=False).encode('utf-8'))+output+256
+            if isinstance(context_limit,int) and upper>context_limit:raise ValueError('输入与输出预算可能超过所选模型上下文上限，请缩短输入或更换模型。')
+            body['max_tokens' if not metadata or 'max_tokens' in params else 'max_completion_tokens']=output
+            body['provider']={'require_parameters':True,'allow_fallbacks':False}
+            if instruction is not None and 'response_format' in params:body['response_format']={'type':'json_object'}
         result=adapter.send(model,keys[provider],body)
         choices=result.get('choices',[])
         if not choices: raise ValueError('提供方未返回可用回复')
+        if provider=='openrouter' and choices[0].get('finish_reason') in ('length','error','content_filter'):
+            raise ValueError('OpenRouter 回复被截断、过滤或生成失败，未作为完整结果采用；用量保留待核。')
         m=choices[0]['message'];text=m.get('content') or '';calls=[]
         for t in m.get('tool_calls',[]):
             calls.append({'name':t['function']['name'],'args':json.loads(t['function']['arguments'])})
-        u=result.get('usage',{});tin=u.get('prompt_tokens');tout=u.get('completion_tokens');actual_model=result.get('model',model)
+        u=result.get('usage') or {};tin=u.get('prompt_tokens');tout=u.get('completion_tokens');actual_model=result.get('model',model)
+        if provider=='openrouter':actual_model=result.get('model') if valid_openrouter_id(result.get('model')) else 'unverified'
     usage=dict(provider=provider,requested_model=model,returned_model=actual_model,input_tokens=tin,output_tokens=tout,
         elapsed_seconds=round(time.monotonic()-started,3),price_source_date=SOURCE_DATE)
     rates=model_rates(provider,model)
     usage['price_basis']='protective_estimate_not_bill' if rates else 'unknown_price_reservation_retained'
     usage['tools_enabled']=tools_enabled
-    if rates and isinstance(tin,int) and isinstance(tout,int):
+    if provider=='openrouter':
+        usage.update(token_usage_source='provider_response' if all(isinstance(n,int) and not isinstance(n,bool) and n>=0 for n in (tin,tout)) else 'unavailable',price_source_date=None,price_basis='catalogue_price_estimate_not_bill' if rates else 'unknown_price_reservation_retained',
+                     model_metadata_available=bool(openrouter_model(model)),billing_amount_confirmed=False)
+        cost=hub.number(u.get('cost'))
+        if cost is not None and 0<=float(cost)<float('inf'):usage['provider_reported_cost_usd']=float(cost)
+    if rates and all(isinstance(n,int) and not isinstance(n,bool) and n>=0 for n in (tin,tout)):
         a,b=rates;usage['estimate_cny']=round((tin*a+tout*b)/1000000,6)
     if companion:usage.update(purpose='pet_chat')
     if not text and not calls: raise ValueError('提供方返回空回复')

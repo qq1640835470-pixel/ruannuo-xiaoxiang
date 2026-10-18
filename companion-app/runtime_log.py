@@ -22,7 +22,7 @@ def safe_value(key,value):
     if not isinstance(value,str):return None
     value=value[:120]
     if re.search(r'(sk-|AIza|AQ\.|Bearer\s|password|token=|key=)',value,re.I):return '[redacted]'
-    if key in ('requested_model','returned_model') and not re.fullmatch(r'(?:gemini|deepseek|qwen|gpt-)[\w.:-]{1,90}',value):return 'unverified'
+    if key in ('requested_model','returned_model') and not re.fullmatch(r'(?:(?:gemini|deepseek|qwen|gpt-)[\w.:-]{1,90}|[A-Za-z0-9][A-Za-z0-9._-]{0,79}/[A-Za-z0-9][A-Za-z0-9._:-]{0,100})',value):return 'unverified'
     if key=='route':return value.split('?',1)[0][:90]
     return re.sub(r'[\r\n\x00-\x1f]',' ',value)
 

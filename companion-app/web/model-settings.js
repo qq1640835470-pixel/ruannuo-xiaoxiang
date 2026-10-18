@@ -23,6 +23,7 @@
   function render(kind) {
     const select = $(kind.model), provider = $(kind.provider)?.value;
     if (!select) return;
+    if (kind.name === 'chat' && $('openrouter-settings')) $('openrouter-settings').hidden = provider !== 'openrouter';
     const catalogue = catalogues.get(provider), selected = maps[kind.key][provider] || catalogue?.defaults?.[kind.name];
     const local = provider === 'local';
     select.hidden = local;
@@ -35,9 +36,13 @@
     select.disabled = false;
     const rows = catalogue?.models || [];
     if (selected && !rows.some(row => row.id === selected)) select.add(new Option(`${selected}（当前配置，列表未确认）`, selected));
-    rows.forEach(row => select.add(new Option(`${row.id} · ${row.protective_estimate_available ? '已有保护估算' : '未核定计费'}`, row.id)));
+    rows.forEach(row => select.add(new Option(`${row.label || row.id} · ${row.id} · ${row.protective_estimate_available ? '已有保护估算' : '未核定计费'}`, row.id)));
     if (selected) select.value = selected;
     else { select.add(new Option('先读取模型列表并选择型号', '')); select.value = ''; }
+    if (kind.name === 'chat' && provider === 'openrouter' && $('model-detail')) {
+      const row = rows.find(r => r.id === select.value);
+      $('model-detail').textContent = row ? `当前 ID：${row.id}；上下文 ${row.context_length ?? '未知'} token；输出上限 ${row.max_completion_tokens ?? '未知'} token；${row.supported_parameters?.includes('response_format') ? '声明支持 JSON 参数' : '按文本生成 JSON'}，均需本机校验。` : '手动 ID 的权限、上下文、输出长度和 JSON 能力尚未确认。';
+    }
   }
   function status() {
     const target = $('catalog-status'); if (!target) return;
@@ -70,11 +75,17 @@
       kinds.forEach(kind => { active[kind.name] = $(kind.provider)?.value; render(kind); });
       status(); load();
     },
-    savePayload() { kinds.forEach(remember); return {chat_models:{...maps.chat_models},pet_models:{...maps.pet_models}}; }
+    savePayload() { kinds.forEach(remember); return Object.fromEntries(Object.entries(maps).map(([key, values]) => [key, Object.fromEntries(Object.entries(values).filter(([provider, value]) => provider !== 'local' && value))])); }
   };
   kinds.forEach(kind => {
     $(kind.provider)?.addEventListener('change', () => { remember(kind); active[kind.name] = $(kind.provider).value; render(kind); status(); load(); });
-    $(kind.model)?.addEventListener('change', () => remember(kind));
+    $(kind.model)?.addEventListener('change', () => { remember(kind); render(kind); });
+  });
+  $('openrouter-use-model')?.addEventListener('click', () => {
+    const value = $('openrouter-model-id').value.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?::[A-Za-z0-9._-]{1,32})?$/.test(value) || value.includes('..') || /sk-|AIza|Bearer/i.test(value)) { $('openrouter-model-status').textContent = 'ID 格式无效，请复制厂商/型号，不要填写名称或 Key。'; return; }
+    maps.chat_models.openrouter = value; render(kinds[0]);
+    $('openrouter-model-status').textContent = 'ID 格式已校验；请保存设置。权限、能力与真实调用待验收。';
   });
   $('catalog-refresh')?.addEventListener('click', () => { kinds.forEach(remember); load(true); });
 })();

@@ -97,6 +97,8 @@ def configure_local(body):
     raise ValueError('不支持这项本地自我调整。')
 def settings():
     with connect() as c:s={r['key']:json.loads(r['value']) for r in c.execute('SELECT * FROM settings')}
+    for key,defaults in (('chat_models',providers.MODELS),('pet_models',providers.PET_MODELS)):
+        s[key]={**defaults,**s.get(key,{})}
     s['model']=((local_models.selection() if local_models.selection()!='auto' else '自动选择 4B / 8B') if local_runtime.status()['installed'] else '本地规则') if s['provider']=='local' else s.get('chat_models',providers.MODELS).get(s['provider'],'本地规则');s['pet_model']=s.get('pet_models',providers.PET_MODELS).get(s['pet_provider'],providers.PET_MODELS.get(s['pet_provider']));s['budget']=budget();s['local_preferences']=local_preferences();return s
 def budget():
     with connect() as c:
@@ -190,7 +192,7 @@ def learning_model(content,instruction,max_tokens):
         except Exception as exc:
             if usage is None:settle(uid,{'requested_model':selected,'error_type':type(exc).__name__})
             runtime_log.error('learning_model_failed',exc,provider=provider)
-            raise ValueError('学习模型请求失败，未生成计划；未自动重试或切换模型，用量未知时预留保留待核。') from None
+            raise ValueError(('学习模型请求失败：'+providers.provider_error_message(exc) if provider=='openrouter' else '学习模型请求失败，未生成计划；')+'未自动重试或切换模型，用量未知时预留保留待核。') from None
     finally:CHAT_LOCK.release()
 
 
@@ -483,7 +485,7 @@ def chat(text):
                     if known_usage is None:settle(uid,{'requested_model':selected,'error_type':type(e).__name__,'diagnostic':diagnostic})
                     code=e.code if isinstance(e,urllib.error.HTTPError) else None
                     result={'reply':'唔，这次没能收到完整回复，主人。可以稍后再试，详情放在下面啦。',
-                            'execution':[{'title':'AI回复','status':'failed','result':f'{provider} 请求未取得可核对结果'+(f'（HTTP {code}）' if code else '')+'；未自动重试或切换模型。'+('本次保护额度预留保留待核账。' if not known_usage or 'estimate_cny' not in known_usage else '已按取得的用量结算，本机后续处理失败。')}],
+                            'execution':[{'title':'AI回复','status':'failed','result':(providers.provider_error_message(e) if provider=='openrouter' else f'{provider} 请求未取得可核对结果')+(f'（HTTP {code}）' if code else '')+'；未自动重试或切换模型。'+('本次保护额度预留保留待核账。' if not known_usage or 'estimate_cny' not in known_usage else '已按取得的用量结算，本机后续处理失败。')}],
                             'actions':[],'provider':provider,'model':selected,'requested_model':selected,'error':True,'diagnostic':diagnostic,'routing':route}
                     if provider!='local' and s.get('local_fallback_enabled') and known_usage is None and local_runtime.status()['installed'] and (code in (401,402,408,429,500,502,503,504) or isinstance(e,(TimeoutError,urllib.error.URLError))):
                         try:
@@ -928,7 +930,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='PATCH' and p=='/api/settings':
                 updates={}
                 if 'provider' in b:
-                    if b['provider'] not in ('local','gemini','deepseek'):raise ValueError('提供方无效')
+                    if b['provider'] not in ('local',*providers.MODELS):raise ValueError('提供方无效')
                     updates['provider']=b['provider']
                 if 'api_generation_enabled' in b:
                     if not isinstance(b['api_generation_enabled'],bool):raise ValueError('开关无效')

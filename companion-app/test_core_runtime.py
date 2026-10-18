@@ -90,7 +90,7 @@ class CoreRuntimeTests(unittest.TestCase):
         with patch('providers.hub.load_keys',side_effect=AssertionError('No keys')):
             for provider in ('openai','claude','glm'):
                 with self.assertRaises(ValueError):providers.chat(provider,[],context='test')
-        self.assertEqual(sum(x['enabled'] for x in providers.adapter_catalogue()['providers']),2)
+        self.assertEqual({x['id'] for x in providers.adapter_catalogue()['providers'] if x['enabled']},{'gemini','deepseek','openrouter'})
 
     def test_unknown_price_autonomous_pet_stays_free(self):
         with patch('providers.chat',side_effect=AssertionError('No model')),patch('local_runtime.status',return_value={'installed':False}):
