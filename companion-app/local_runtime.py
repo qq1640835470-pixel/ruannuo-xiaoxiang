@@ -95,9 +95,11 @@ def ensure_ready(model=MODEL):
         _LAST_ERROR='本机运行时启动失败，请检查本机llama-server.log；未调用云端。'
         raise ValueError(_LAST_ERROR)
 
-def chat(history,context,companion=False,model=None,tools=None):
+def chat(history,context,companion=False,model=None,tools=None,*,instruction=None,max_output_tokens=None):
     global _LAST_ROUTE
     routing=choose(history,companion,model);first=routing['model']
+    if instruction is not None:
+        return _chat_once(history,{},False,first,[],instruction=instruction,max_output_tokens=max_output_tokens)
     try:
         result=_chat_once(history,context,companion,first,tools)
         result['usage']['local_routing']=routing;_LAST_ROUTE=routing
@@ -110,7 +112,7 @@ def chat(history,context,companion=False,model=None,tools=None):
         _LAST_ROUTE=result['usage']['local_routing']
         return result
 
-def _chat_once(history,context,companion=False,model=None,tools=None):
+def _chat_once(history,context,companion=False,model=None,tools=None,*,instruction=None,max_output_tokens=None):
     global _LAST_USED,_LAST_ROUTE
     routing=choose(history,companion,model);selected_model=routing['model']
     runtime_log.event('local_model_routing',provider='local',requested_model=selected_model,routing_reason=routing['reason'],selection_mode=local_models.selection())
@@ -142,8 +144,10 @@ def _chat_once(history,context,companion=False,model=None,tools=None):
     if selected_model!=local_models.GEMMA:prompt+='/no_think'
     if companion:prompt+='\n只说一句自然中文，最多55字。不调用工具，不催促，不虚构观察。'
     if not tools:prompt+='\n本次没有可用工具，只能提供文字回复，不得声称已记录或执行操作。'
+    if instruction is not None:prompt=instruction
     body={'model':selected_model,'messages':[{'role':'system','content':prompt},*messages],'max_tokens':160 if companion else 1536 if selected_model==local_models.LARGE else 768,'temperature':.7,'top_p':.8,'top_k':20,'min_p':0,'stream':False}
     if selected_model!=local_models.GEMMA:body['chat_template_kwargs']={'enable_thinking':False}
+    if max_output_tokens is not None:body['max_tokens']=max_output_tokens
     if tools:body['tools']=[t if t.get('type')=='function' else {'type':'function','function':t} for t in tools];body['tool_choice']='auto'
     started=time.monotonic()
     with _LOCK:

@@ -1,7 +1,7 @@
 "use strict";
 const $ = (selector) => document.querySelector(selector);
 const state = {tasks: [], messages: [], settings: {}, connectors: [], filter: "open", busy: false, editingTaskId: null};
-const statusNames = {pending:"待安排", active:"进行中", paused:"已暂停", done:"已完成"};
+const statusNames = {pending:"待安排", active:"进行中", paused:"已暂停", deferred:"已延期", done:"已完成", cancelled:"已取消"};
 let lastFocus;
 
 async function api(path, options = {}) {
@@ -21,7 +21,10 @@ function dateLabel(value, includeYear = false) {
   return d.toLocaleString("zh-CN", {year:includeYear?"numeric":undefined,month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"});
 }
 function changePage(page) {
-  const plan=page==="plan";$("#chat-page").hidden=plan;$("#plan-page").hidden=!plan;$("#page-title").textContent=plan?"计划日程":"";
+  if(!["chat","plan","learning"].includes(page))page="chat";
+  document.querySelectorAll("main > .page").forEach(node=>{node.hidden=node.id!==`${page}-page`;});
+  $("#page-title").textContent=page==="plan"?"计划日程":page==="learning"?"学习":"";
+  if(page==="learning")window.dispatchEvent(new Event("learning-open"));
   document.querySelectorAll("[data-page]").forEach(b=>{b.classList.toggle("selected",b.dataset.page===page);b.setAttribute("aria-current",b.dataset.page===page?"page":"false");});
   history.replaceState(null,"",`#${page}`);
 }
@@ -117,7 +120,7 @@ async function sendMessage(event,requestId,attachmentOverride) {
 async function refreshTasks() {try{const data=await api("/api/state");state.tasks=data.tasks||[];if(data.settings)state.settings=data.settings;if(data.budget)state.settings.budget=data.budget;if(Array.isArray(data.feedback_drafts))importFeedbackDrafts(data.feedback_drafts);renderTasks();renderSettings();}catch(e){error(`刷新日程失败：${e.message}`);}}
 function renderTasks() {
   const list=$("#task-list");list.replaceChildren();
-  const tasks=state.tasks.filter(t=>state.filter==="all"||(state.filter==="done"?t.status==="done":t.status!=="done")).slice().sort((a,b)=>{
+  const tasks=state.tasks.filter(t=>state.filter==="all"||(state.filter==="done"?t.status==="done":!["done","cancelled"].includes(t.status))).slice().sort((a,b)=>{
     if(!a.scheduled_at)return b.scheduled_at?1:0;if(!b.scheduled_at)return -1;return String(a.scheduled_at).localeCompare(String(b.scheduled_at));
   });
   $("#task-count").textContent=`${tasks.length} 件事`;
@@ -275,7 +278,7 @@ $("#export-button").addEventListener("click",exportData);
 $('#diagnostics-view').addEventListener('click',()=>loadDiagnostics(false));$('#diagnostics-export').addEventListener('click',()=>loadDiagnostics(true));
 document.addEventListener("keydown",event=>{if($("#settings-drawer").hidden)return;if(event.key==="Escape")closeSettings();if(event.key==="Tab"){const focusables=Array.from($("#settings-drawer").querySelectorAll("button,input,select,a[href]")).filter(e=>!e.disabled&&!e.hidden);const first=focusables[0],last=focusables.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
 $("#today-label").textContent=new Date().toLocaleDateString("zh-CN",{year:"numeric",month:"long",day:"numeric",weekday:"long"});
-changePage(location.hash==="#plan"?"plan":"chat");
+changePage(location.hash.slice(1)||"chat");
 (async()=>{try{const data=await api("/api/state");state.tasks=data.tasks||[];state.messages=data.messages||[];state.settings=data.settings||{};if(data.budget)state.settings.budget=data.budget;state.connectors=data.connectors||[];if(Array.isArray(data.feedback_drafts))importFeedbackDrafts(data.feedback_drafts);renderMessages();renderTasks();renderSettings();$("#connection-status").textContent="已连接本机服务";}catch(e){$("#connection-status").textContent="本机服务未连接";error(`连接失败：${e.message}。请确认助手服务已启动，再刷新页面。`);renderTasks();}})();
 
 

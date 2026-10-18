@@ -12,6 +12,8 @@
   <script src="/daylight.js" defer></script>
   <script src="/diagnostics.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/learning.js" defer></script>
+  <link rel="stylesheet" href="/learning.css">
   <script src="/chat-attachments.js" defer></script>
   <script src="/feedback-target.js" defer></script>
   <script src="/activity-speech-settings.js" defer></script>
@@ -37,7 +39,7 @@
   <div class="app-shell">
     <aside class="sidebar">
       <a href="#chat" class="brand" aria-label="软糯小祥首页"><img class="brand-mark" src="/xy-icon.png" alt="丰川祥子像素图标"><span>软糯小祥</span></a>
-      <nav aria-label="主导航"><button class="nav-item selected" data-page="chat"><span>◌</span>对话</button><button class="nav-item" data-page="plan"><span>▦</span>计划日程</button></nav>
+      <nav aria-label="主导航"><button class="nav-item selected" data-page="chat"><span>◌</span>对话</button><button class="nav-item" data-page="plan"><span>▦</span>计划日程</button><button class="nav-item" data-page="learning"><span>▤</span>学习</button></nav>
       <section id="sakiko-companion" class="pet" aria-label="小祥陪伴">
         <div class="pet-bubble" id="pet-bubble" role="status" aria-live="polite">
           <div class="pet-bubble-heading"><span id="pet-bubble-kind">小祥 · 小声说</span><button id="pet-dismiss" type="button" aria-label="收起小祥的对话">×</button></div>
@@ -60,6 +62,15 @@
           <div class="welcome" id="welcome"><h2>今天想聊什么？</h2><div class="suggestions"><button data-prompt="打开高德地图去深圳大学">↗ <span>打开高德地图去深圳大学</span></button><button data-prompt="记下明天买电池">＋ <span>记下明天买电池</span></button><button data-prompt="打开微信">◌ <span>打开微信</span></button><button data-prompt="查询API余额">◎ <span>查询 API 余额</span></button></div></div>
         </div>
         <form id="chat-form" class="composer"><label class="sr-only" for="chat-input">告诉我想做的事</label><textarea id="chat-input" rows="2" placeholder="说说你想做的事…" maxlength="3000"></textarea><div class="composer-footer"><span>Enter 发送 · Shift + Enter 换行</span><button type="submit" id="send-button" class="send-button" aria-label="发送消息">↑</button></div></form>
+      </section>
+      <section id="learning-page" class="page learning-page" aria-label="学习" hidden>
+        <h2>学习计划</h2><p class="muted-text">先核对需求，再生成草稿；确认后才保存。完成任务不等于已经掌握。</p>
+        <p class="muted-text">点击分析或生成时，仅本页填写的需求发送给设置中所选模型；云模型可能计费。已有学习记录和备注不会自动发送。</p>
+        <p id="learning-status" role="status"></p>
+        <form id="learning-input"><label>想学什么<textarea id="learning-request" rows="3" maxlength="2500" placeholder="我想在7天内复习完电路分析，每天约2小时。"></textarea></label><button class="subtle-button" type="submit">分析学习需求</button></form>
+        <form id="learning-requirements"><h3>请核对并补充关键信息</h3><p id="learning-questions"></p><div id="learning-fields" class="learning-grid"></div><button class="primary-button" type="submit">信息已核对，生成计划草稿</button></form>
+        <div id="learning-draft" hidden></div>
+        <div class="learning-heading"><h3>已保存计划</h3><button id="learning-refresh" class="subtle-button">刷新学习状态</button></div><div id="learning-plans"></div>
       </section>
       <section id="plan-page" class="page plan-page" aria-label="计划日程" hidden>
         <div class="plan-intro"><button class="primary-button" id="new-task-button">＋ 记一件事</button></div>

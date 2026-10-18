@@ -1,0 +1,15 @@
+.learning-page{overflow:auto;padding-bottom:3rem;max-width:1100px;margin:0 auto;width:100%}
+.learning-page h2,.learning-page h3{margin:1rem 0 .6rem}
+.learning-page form,.learning-plan{margin:1rem 0;padding:1rem;border:1px solid var(--border,#d6e0ea);border-radius:16px;background:var(--surface,#f8fafc)}
+.learning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.learning-page label{display:flex;flex-direction:column;gap:6px;font-size:.9rem;min-width:0}
+.learning-page input,.learning-page textarea,.learning-page select{width:100%;box-sizing:border-box;padding:9px;border:1px solid #cbd6e2;border-radius:8px;background:#fff;color:#334155;font:inherit}
+.learning-page textarea{resize:vertical}
+.learning-task{margin:12px 0;padding:12px;border:1px solid #d9e2ed;border-radius:12px;min-width:0;overflow-wrap:anywhere}
+.learning-task h4{margin:.3rem 0}.learning-task p{white-space:pre-wrap}
+.learning-actions,.learning-heading{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:10px 0}
+.learning-heading{justify-content:space-between}.learning-page summary{cursor:pointer;margin:12px 0;font-weight:600}
+.learning-record{padding:8px;border-bottom:1px solid #d9e2ed}.learning-page button{cursor:pointer}
+#learning-status{white-space:pre-wrap;color:#365b7f;overflow-wrap:anywhere}
+.learning-page[aria-busy=true]{opacity:.8;pointer-events:none}
+@media(max-width:650px){.learning-grid{grid-template-columns:1fr}.learning-page form,.learning-plan{padding:10px}}
