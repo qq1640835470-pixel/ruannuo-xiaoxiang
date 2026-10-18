@@ -3,6 +3,13 @@
 :root{font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;--muted:#596e8c}
 body{font-weight:400;text-rendering:optimizeLegibility}
 button,input,textarea,select{font-family:inherit}
+.chat-attachment-list{display:flex;gap:6px;flex-wrap:wrap;max-height:150px;overflow:auto}
+.chat-attachment-chip{display:flex;align-items:center;gap:6px;max-width:100%;border:1px solid var(--line);border-radius:8px;padding:4px 7px}
+.chat-attachment-chip span{overflow-wrap:anywhere;min-width:0}.chat-attachment-tip{font-size:11px;line-height:1.5;margin:5px 0;color:#53657a}
+.chat-attachment-chip img{width:42px;height:42px;object-fit:contain}.chat-attachment-link{display:flex;align-items:center;gap:8px;margin-top:6px;overflow-wrap:anywhere}
+.chat-attachment-link img{width:96px;max-height:96px;object-fit:contain}.composer-footer{flex-wrap:wrap;gap:6px}
+#feedback-target-settings label{display:block;margin:8px 0}#feedback-target-settings input:not([type=checkbox]){display:block;width:100%;padding:8px;border:1px solid var(--line);border-radius:8px}
+#feedback-target-settings button{margin:4px 6px 4px 0}#feedback-target-display,#feedback-target-status,#feedback-test-status{overflow-wrap:anywhere}
 .message-text{color:var(--ink);font-weight:400}
 .pet-bubble-heading{font-size:11px;color:#526b8b}
 .pet-bubble p{font-size:13px;line-height:1.75;color:#405470}

@@ -35,10 +35,11 @@ function renderMessages() {
     const row=el("article",`message ${role}`);const avatar=el("div",role==="user"?"message-avatar":"message-avatar sakiko-avatar",role==="user"?"我":undefined);if(role==="assistant"){avatar.setAttribute("role","img");avatar.setAttribute("aria-label","小祥");}row.append(avatar);
     const body=message.display_content||message.content||"";
     const content=el("div","message-content");content.append(el("div","message-text",body));
+    window.XYAttachments?.renderMessage(message,content);
     if(role==="assistant"){
       const details=executionBlock(message);if(details)content.append(details);
       const previous=visibleMessages.slice(0,index).reverse().find(m=>m.role==="user");
-      const retry=chatRetry(message,previous?.content);if(retry)content.append(retry);
+      const retry=chatRetry(message,previous?.content,previous?.attachments);if(retry)content.append(retry);
       if(body){const voice=el("button","text-button voice-button","▷ 生成语音");voice.type="button";voice.addEventListener("click",()=>readAloud(body,voice));content.append(voice);}
     }
     if(message.created_at)content.append(el("div","message-time",dateLabel(message.created_at)));
@@ -53,13 +54,13 @@ function retryState(message){
   const uncertain=records.some(r=>['completed','requested','unknown','sending'].includes(r.status));
   return {failed,uncertain};
 }
-function chatRetry(message,text){
+function chatRetry(message,text,attachments){
   const status=retryState(message);if(!status.failed||!text)return null;
   const box=el('div','message-retry');
   if(message.request_id)box.append(el('small','',`请求编号：${message.request_id}`));
   if(status.uncertain){box.append(el('small','','部分操作已发起或完成，请先核对操作记录；如需继续，可编辑原消息后发送。'));return box;}
   const retry=el('button','subtle-button','重试这条消息');retry.type='button';retry.disabled=state.busy;
-  retry.addEventListener('click',()=>{if(state.busy)return;$('#chat-input').value=text;sendMessage();});
+  retry.addEventListener('click',()=>{if(state.busy)return;$('#chat-input').value=text;sendMessage(null,undefined,attachments||[]);});
   box.append(retry);return box;
 }
 function executionBlock(message) {
@@ -87,15 +88,21 @@ function executionBlock(message) {
   if(message.provider)appendCode(`回复来源：${message.provider==="local"?"本机处理":message.provider}\n型号：${message.model||"未提供"}`);
   return box;
 }
-async function sendMessage(event,requestId) {
-  event?.preventDefault();const input=$("#chat-input");const text=input.value.trim();if(!text||state.busy)return;
+async function sendMessage(event,requestId,attachmentOverride) {
+  event?.preventDefault();const input=$("#chat-input");
+  if(window.XYAttachments?.uploading){error('附件正在传到本机，请稍等。');return;}
+  const attachments=attachmentOverride??window.XYAttachments?.snapshot()??[];
+  const text=input.value.trim()||(attachments.length?'请帮我看看这些附件。':'');if(!text||state.busy)return;
   requestId=requestId||crypto.randomUUID().replaceAll('-','');
   state.busy=true;$('#chat-recover')?.setAttribute('hidden','');$("#send-button").disabled=true;input.disabled=true;error("");input.value="";
+  window.XYAttachments?.setBusy(true);
+  const recovery={text,id:requestId,...(attachments.length?{attachments}:{})};
   window.dispatchEvent(new CustomEvent("xy:companion",{detail:{type:"thinking"}}));
-  state.messages.push({role:"user",content:text,created_at:new Date().toISOString()});renderMessages();
-  const controller=new AbortController(),responseTimeout=setTimeout(()=>controller.abort(),60000);
-  try {const result=await api("/api/chat",{method:"POST",body:JSON.stringify({text,client_request_id:requestId}),signal:controller.signal});
-    if(result.pending){try{localStorage.setItem('xy.chat.pending',JSON.stringify({text,id:requestId}));}catch{}window.dispatchEvent(new CustomEvent('xy:chat-recovery',{detail:{text,id:requestId}}));input.value=text;}else{try{const saved=JSON.parse(localStorage.getItem('xy.chat.pending')||'null');if(saved?.id===requestId)localStorage.removeItem('xy.chat.pending');}catch{}}
+  state.messages.push({role:"user",content:text,attachments,created_at:new Date().toISOString()});renderMessages();
+  const controller=new AbortController(),responseTimeout=setTimeout(()=>controller.abort(),attachments.length?180000:60000);
+  try {const result=await api("/api/chat",{method:"POST",body:JSON.stringify({text,client_request_id:requestId,...(attachments.length?{attachment_ids:attachments.map(a=>a.id)}:{})}),signal:controller.signal});
+    if(result.pending){try{localStorage.setItem('xy.chat.pending',JSON.stringify(recovery));}catch{}window.dispatchEvent(new CustomEvent('xy:chat-recovery',{detail:recovery}));input.value=text;}else{try{const saved=JSON.parse(localStorage.getItem('xy.chat.pending')||'null');if(saved?.id===requestId)localStorage.removeItem('xy.chat.pending');}catch{}}
+    if(!result.pending&&!result.error)window.XYAttachments?.clear(attachments.map(a=>a.id));
     if(result.music){window.dispatchEvent(new CustomEvent('xy:music-queue',{detail:{tracks:result.music.tracks.map(t=>({...t,remote:true})),append:false}}));const song=result.music.tracks.find(t=>String(t.id)===String(result.music.play_id));if(song)window.dispatchEvent(new CustomEvent('xy:music-select',{detail:{...song,remote:true}}));}
     if(result.workspace)window.dispatchEvent(new CustomEvent("xy:workspace",{detail:result.workspace}));
     if(Array.isArray(result.feedback_drafts))importFeedbackDrafts(result.feedback_drafts);
@@ -104,8 +111,8 @@ async function sendMessage(event,requestId) {
     window.dispatchEvent(new CustomEvent("xy:companion",{detail:{type:"reply",text:result.reply,failed:result.error||result.actions?.some(a=>a.status==="failed")}}));
     if(result.error||result.actions?.some(a=>a.status==="failed"))input.value=text;
     await refreshTasks();
-  }catch(e){try{localStorage.setItem('xy.chat.pending',JSON.stringify({text,id:requestId}));}catch{}window.dispatchEvent(new CustomEvent('xy:chat-recovery',{detail:{text,id:requestId}}));error(`消息未完成：${e.message}。可以点击“核对结果／重试”；原文字已保留。`);input.value=text;window.dispatchEvent(new CustomEvent("xy:companion",{detail:{type:"error"}}));}
-  finally {clearTimeout(responseTimeout);state.busy=false;$("#send-button").disabled=false;input.disabled=false;renderMessages();input.focus();}
+  }catch(e){try{localStorage.setItem('xy.chat.pending',JSON.stringify(recovery));}catch{}window.dispatchEvent(new CustomEvent('xy:chat-recovery',{detail:recovery}));error(`消息未完成：${e.message}。可以点击“核对结果／重试”；原文字与附件已保留。`);input.value=text;window.dispatchEvent(new CustomEvent("xy:companion",{detail:{type:"error"}}));}
+  finally {clearTimeout(responseTimeout);state.busy=false;$("#send-button").disabled=false;input.disabled=false;window.XYAttachments?.setBusy(false);renderMessages();input.focus();}
 }
 async function refreshTasks() {try{const data=await api("/api/state");state.tasks=data.tasks||[];if(data.settings)state.settings=data.settings;if(data.budget)state.settings.budget=data.budget;if(Array.isArray(data.feedback_drafts))importFeedbackDrafts(data.feedback_drafts);renderTasks();renderSettings();}catch(e){error(`刷新日程失败：${e.message}`);}}
 function renderTasks() {
@@ -150,6 +157,8 @@ function stopReadAloud(){
   const stop=$('#speech-stop');if(stop)stop.hidden=true;
 }
 function readAloud(text,button){
+  text=text.replaceAll('*','').replace(/(?<![A-Za-z0-9_])xy(?![A-Za-z0-9_])/gi,'叉歪');
+  if(!text.trim())return;
   if(window.XYSpeech)return window.XYSpeech.speak(text,button);
   if(!('speechSynthesis' in window)){error('此浏览器不支持系统语音朗读。');return;}
   if(readAloud.current?.text===text){stopReadAloud();return;}
@@ -176,7 +185,7 @@ async function patchFeedbackSource(draft,status,deliveryId){if(!draft?.source_id
 function notifyFeedbackChange(){if(typeof window!=='undefined'&&typeof CustomEvent!=='undefined')window.dispatchEvent(new CustomEvent('xy-feedback-change'));}
 function saveFeedbackWorking(){try{localStorage.setItem(feedbackWorkingKey,JSON.stringify({content:$('#feedback-content').value,updatedAt:new Date().toISOString(),draftId:editingDraftId,mode:editingDraftId?'edit':'new'}));notifyFeedbackChange();return true;}catch{return false;}}
 function renderFeedbackDrafts(){const list=$('#feedback-draft-list');list.replaceChildren();const drafts=readFeedbackDrafts();const count=$('#feedback-draft-count');if(count)count.textContent=`共 ${drafts.length} 条暂存反馈`;if(!drafts.length){list.append(el('p','muted-text','暂无暂存反馈'));return;}drafts.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt))).forEach(d=>{const row=el('div','feedback-draft-row');const open=el('button','feedback-draft-open');open.type='button';open.textContent=`${d.title?d.title+' · ':''}${d.content.slice(0,60).replace(/\s+/g,' ')} · ${d.delivery==='queued'?'已排队':d.delivery==='sending'?'发送中':d.delivery==='unknown'?'状态待核对':'未发送'} · ${dateLabel(d.updatedAt)}`;open.addEventListener('click',()=>{if(!preserveFeedbackBeforeSwitch())return;editingDraftId=d.id;$('#feedback-content').value=d.content;$('#feedback-status').textContent=d.deliveryDetail||'正在编辑这条暂存反馈；暂存后才会更新原记录。';$('#feedback-source-details').hidden=!(d.source==='api'&&d.raw_text);$('#feedback-source-text').textContent=d.source==='api'?(d.raw_text||''):'';if(!saveFeedbackWorking())$('#feedback-status').textContent='浏览器本机存储不可用；当前内容仍在编辑框中。';updateFeedbackSendState();});const remove=el('button','subtle-button','删除');remove.type='button';remove.addEventListener('click',async()=>{if(d.source_id){if(!ignoreFeedbackSource(d.source_id)){$('#feedback-status').textContent='本机忽略记录保存失败，未删除该反馈。';return;}void patchFeedbackSource(d,'dismissed');}if(!writeFeedbackDrafts(readFeedbackDrafts().filter(x=>x.id!==d.id))){$('#feedback-status').textContent='无法写入本机存储，暂存未删除。';return;}if(editingDraftId===d.id){editingDraftId='';$('#feedback-source-details').hidden=true;$('#feedback-source-text').textContent='';}renderFeedbackDrafts();});row.append(open,remove);list.append(row);});}
-function updateFeedbackSendState(){const save=$('#feedback-save-draft');save.textContent=editingDraftId?'保存修改':'暂存为新反馈';const count=$('#feedback-draft-count');if(count)count.textContent=`共 ${readFeedbackDrafts().length} 条暂存反馈`;const content=$('#feedback-content').value.trim(),draft=readFeedbackDrafts().find(d=>d.id===editingDraftId);const blocked=['queued','sending'].includes(draft?.delivery)||(['unknown','failed'].includes(draft?.delivery)&&(content===lastFeedbackContent||content===draft.attemptedContent));$('#feedback-send').disabled=feedbackSending||!content||blocked;}
+function updateFeedbackSendState(){const save=$('#feedback-save-draft');save.textContent=editingDraftId?'保存修改':'暂存为新反馈';const count=$('#feedback-draft-count');if(count)count.textContent=`共 ${readFeedbackDrafts().length} 条暂存反馈`;const content=$('#feedback-content').value.trim(),draft=readFeedbackDrafts().find(d=>d.id===editingDraftId);const blocked=['queued','sending'].includes(draft?.delivery)||(draft?.delivery==='unknown'&&(content===lastFeedbackContent||content===draft.attemptedContent));const target=window.XYFeedbackTarget?.snapshot();$('#feedback-send').disabled=feedbackSending||!content||blocked||!!(window.XYFeedbackTarget&&(!target?.configured||!target.enabled));}
 async function pollFeedback(id,attempt=0){
     try{const r=await api('/api/feedback/'+encodeURIComponent(id));if(id!==feedbackId)return;
     $('#feedback-status').textContent=r.detail;$('#feedback-status').dataset.status=r.status;
@@ -194,10 +203,10 @@ async function sendFeedback(event){
   event.preventDefault();updateFeedbackSendState();if($('#feedback-send').disabled)return;
   const content=$('#feedback-content').value.trim(),drafts=readFeedbackDrafts();let draft=drafts.find(d=>d.id===editingDraftId);
   if(!draft){draft={id:crypto.randomUUID()};drafts.push(draft);editingDraftId=draft.id;}
-  const sendingDraftId=draft.id,deliveryId=crypto.randomUUID();
-  Object.assign(draft,{content,updatedAt:new Date().toISOString(),attemptedContent:content,deliveryId,delivery:'sending',deliveryDetail:'正在发送给Codex…'});
+  const sendingDraftId=draft.id,deliveryId=crypto.randomUUID(),target=window.XYFeedbackTarget?.snapshot();
+  Object.assign(draft,{content,updatedAt:new Date().toISOString(),attemptedContent:content,deliveryId,delivery:'sending',deliveryTarget:target?.thread_id,deliveryDetail:'正在发送给Codex…'});
   if(!writeFeedbackDrafts(drafts)){$('#feedback-status').textContent='本机暂存失败，已保留文字；请恢复本机存储后再发送。';return;}saveFeedbackWorking();renderFeedbackDrafts();feedbackSending=true;clearTimeout(feedbackTimer);feedbackId=deliveryId;$('#feedback-send').disabled=true;$('#feedback-status').textContent='正在发送给Codex…';
-  try{const r=await api('/api/feedback',{method:'POST',body:JSON.stringify({id:deliveryId,content})});lastFeedbackContent=content;
+  try{const r=await api('/api/feedback',{method:'POST',body:JSON.stringify({id:deliveryId,content,target_thread_id:target?.thread_id})});lastFeedbackContent=content;
     const saved=readFeedbackDrafts(),record=saved.find(d=>d.id===sendingDraftId);
     if(record){record.delivery=r.status==='queued'||r.status==='completed'?'queued':r.status==='sending'?'sending':r.status==='failed'?'failed':'unknown';record.deliveryDetail=r.detail;writeFeedbackDrafts(saved);renderFeedbackDrafts();}
     try{localStorage.setItem('xy.feedback.last',deliveryId);}catch{}

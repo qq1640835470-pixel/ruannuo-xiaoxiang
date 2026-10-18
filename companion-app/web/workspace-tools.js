@@ -39,7 +39,19 @@
   commentary.addEventListener('click',async()=>{const track=tracks[active];if(!track||commentBusy)return;commentBusy=true;commentary.disabled=true;commentResult.textContent='正在聊这首歌…';try{const d=await call('/api/music/commentary',{title:track.name,artist:track.artists||''});window.dispatchEvent(new CustomEvent('xy:music-commentary',{detail:d}));commentResult.textContent=d.text||'暂时没有评论。';}catch(e){commentResult.textContent='评论暂未完成：'+e.message;}finally{commentBusy=false;commentary.disabled=!tracks[active];}});
   function publish(){const t=tracks[active];commentary.disabled=commentBusy||!t;window.dispatchEvent(new CustomEvent('xy:music-state',{detail:{playing:!!t&&!audio.paused&&!audio.ended,title:t?.name||'',artist:t?.artists||''}}));}
   function render(){list.replaceChildren(...tracks.map((track,index)=>{const b=document.createElement('button');b.type='button';b.className='music-track'+(active===index?' selected':'');b.textContent=label(track);b.addEventListener('click',()=>play(index));return b;}));}
-  async function play(index){if(!tracks.length)return;const revision=++playRevision;audio.pause();active=(index+tracks.length)%tracks.length;const track=tracks[active];audio.removeAttribute('src');audio.load();render();publish();status.textContent=label(track);try{let url=track.url;if(track.remote){const d=await call('/api/music/url?id='+encodeURIComponent(track.id));if(revision!==playRevision)return;if(!d.available){status.textContent=d.detail;return;}url=d.url;status.textContent=label(track)+(d.trial?'（试听片段）':'');}if(revision!==playRevision)return;audio.src=url;await audio.play();}catch(e){if(revision===playRevision){status.textContent=track.remote?'音乐未能播放：'+e.message:'已选中 '+track.name+'，请点播放。';publish();}}}
+  async function play(index,remaining=Math.min(tracks.length,20)){
+    if(!tracks.length)return;const revision=++playRevision;audio.pause();active=(index+tracks.length)%tracks.length;
+    const track=tracks[active];audio.removeAttribute('src');audio.load();render();publish();status.textContent=label(track);
+    try{
+      let url=track.url;
+      if(track.remote){
+        const d=await call('/api/music/url?id='+encodeURIComponent(track.id));if(revision!==playRevision)return;
+        if(!d.available){if(remaining>1){await play(active+1,remaining-1);return;}status.textContent='本次队列没有取得可播放音源，请重选曲目；没有绕过会员或版权限制。';return;}
+        url=d.url;status.textContent=label(track)+(d.trial?'（试听片段）':'');
+      }
+      if(revision!==playRevision)return;audio.src=url;await audio.play();
+    }catch(e){if(revision===playRevision){status.textContent=track.remote?'音乐未能播放：'+e.message:'已选中 '+track.name+'，请点播放。';publish();}}
+  }
   function clear(){++playRevision;audio.pause();audio.removeAttribute('src');audio.load();for(const t of tracks)if(t.url?.startsWith('blob:'))URL.revokeObjectURL(t.url);tracks=[];active=-1;publish();}
   $('#music-files').addEventListener('change',e=>{clear();tracks=Array.from(e.target.files||[]).filter(f=>/\.(mp3|wav|ogg|m4a|aac|flac|webm)$/i.test(f.name)).slice(0,100).map(f=>({name:f.name,url:URL.createObjectURL(f)}));render();status.textContent=tracks.length?`已选择 ${tracks.length} 首；点击曲目播放。`:'未选择可播放的音乐。';});
   window.addEventListener('xy:music-queue',e=>{if(!e.detail.append)clear();tracks.push(...e.detail.tracks);render();status.textContent=`已载入 ${tracks.length} 首歌曲。`;});

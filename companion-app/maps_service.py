@@ -1,5 +1,6 @@
-"""Explicit public-place lookup; no API key, autocomplete, bulk lookup or LLM."""
+"""Explicit place candidates from configured AMap or the legacy public lookup."""
 import json,threading,time,urllib.parse,urllib.request
+import app_paths,maps_routes
 _LOCK=threading.Lock()
 _CACHE={}
 _LAST=0.0
@@ -8,6 +9,9 @@ def search_places(query):
     global _LAST
     query=str(query).strip()
     if not query or len(query)>160:raise ValueError('地点名称须为1至160字。')
+    try:configured=maps_routes.search_places(query,app_paths.DATA)
+    except ValueError:return {'status':'unavailable','query':query,'results':[],'detail':'本机地图配置无法读取，请在路线设置中重新保存。'}
+    if configured is not None:return configured
     with _LOCK:
         cached=_CACHE.get(query)
         if cached and time.time()-cached[0]<86400:return cached[1]

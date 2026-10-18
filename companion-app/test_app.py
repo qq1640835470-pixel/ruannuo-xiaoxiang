@@ -128,10 +128,11 @@ class AppTests(unittest.TestCase):
 
     def test_feedback_bridge_queue_idempotency_and_restart(self):
         import uuid
+        target=server.feedback_bridge.configure({'thread_id':'11111111-1111-4111-8111-111111111111','label':'fixture','enabled':True},server.DATA)
         fid=uuid.uuid4().hex
         with patch('server.threading.Thread') as thread,patch('feedback_bridge.send',return_value={'status':'queued','detail':'accepted by queue'}) as send:
             thread.return_value.start.side_effect=lambda:thread.call_args.kwargs['target']()
-            result=server.submit_feedback({'id':fid,'content':'界面颜色反馈'})
+            result=server.submit_feedback({'id':fid,'content':'界面颜色反馈','target_thread_id':target['thread_id']})
             self.assertEqual(result['status'],'queued')
             self.assertEqual(server.submit_feedback({'id':fid,'content':'duplicate'})['status'],'queued');send.assert_called_once()
             with server.connect() as c:self.assertEqual(c.execute('SELECT COUNT(*) FROM feedback').fetchone()[0],1)
@@ -141,13 +142,14 @@ class AppTests(unittest.TestCase):
 
     def test_feedback_cli_is_exact_thread_no_shell_and_timeout_is_unknown(self):
         import feedback_bridge,subprocess,types
+        target={'thread_id':'11111111-1111-4111-8111-111111111111','label':'fixture','enabled':True,'configured':True}
         with patch('feedback_bridge.executable',return_value='codex.exe'),patch('feedback_bridge.subprocess.run',return_value=types.SimpleNamespace(returncode=0)) as run:
-            result=feedback_bridge.send('a; $(not a command)','abc')
+            result=feedback_bridge.send('a; $(not a command)','abc',target)
             self.assertEqual(result['status'],'queued');args=run.call_args.args[0]
-            self.assertEqual(args[1:4],['queue','--thread',feedback_bridge.THREAD_ID]);self.assertIn('$(not a command)',args[-1]);self.assertNotIn('shell',run.call_args.kwargs)
+            self.assertEqual(args[1:4],['queue','--thread',target['thread_id']]);self.assertIn('$(not a command)',args[-1]);self.assertNotIn('shell',run.call_args.kwargs)
         with patch('feedback_bridge.executable',return_value='codex.exe'),patch('feedback_bridge.subprocess.run',side_effect=subprocess.TimeoutExpired('codex',20)):
-            self.assertEqual(feedback_bridge.send('test','abc')['status'],'unknown')
-        with patch('feedback_bridge.executable',return_value=None):self.assertEqual(feedback_bridge.send('test','abc')['status'],'failed')
+            self.assertEqual(feedback_bridge.send('test','abc',target)['status'],'unknown')
+        with patch('feedback_bridge.executable',return_value=None):self.assertEqual(feedback_bridge.send('test','abc',target)['status'],'failed')
 
     def test_current_time_in_both_main_context_and_pet_context(self):
         with patch('server.now',return_value='2026-10-16T23:59:59+08:00'):

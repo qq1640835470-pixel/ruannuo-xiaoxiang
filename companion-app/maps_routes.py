@@ -11,6 +11,7 @@ import math
 import pathlib
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 
@@ -55,7 +56,7 @@ def _public(data):
                            'available': p != 'google', 'reason': GOOGLE_REASON if p == 'google' else ''}
                           for p, name in PROVIDERS.items()],
             'summary': ('已保存本机配置，尚未验证服务权限。' if configured else '尚未配置地图 Key，暂不能查询真实路线。'),
-            'privacy': '仅主动查询时将输入的起点、终点发给选定平台；不自动发送设备 GPS。费用和配额由平台规则决定。'}
+            'privacy': '仅主动查询时将输入的地点名称或起点、终点发给选定平台；不自动发送设备 GPS。费用和配额由平台规则决定。'}
 
 
 def status(data_dir):
@@ -146,18 +147,49 @@ def _amap_geocode(address, key):
             'city': _text(row.get('citycode')) or _text(row.get('city'))}
 
 
-def _amap_landmark(address,key):
-    raw=_request('amap_poi',{'keywords':address,'key':key,'offset':10,'extensions':'base','output':'JSON'})
+def _amap_pois(query,key):
+    raw=_request('amap_poi',{'keywords':query,'key':key,'offset':10,'extensions':'base','output':'JSON'})
     if str(raw.get('status'))!='1':raise RuntimeError('provider rejected')
+    rows=[];seen=set()
+    for row in (raw.get('pois') or [])[:10]:
+        name=_text(row.get('name')).replace(key,'[已隐藏]');coordinate=row.get('location','')
+        if not name or not isinstance(coordinate,str) or not re.fullmatch(r'-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?',coordinate):continue
+        lng,lat=map(float,coordinate.split(','))
+        if not (-180<=lng<=180 and -90<=lat<=90) or (name,coordinate) in seen:continue
+        seen.add((name,coordinate))
+        address=''.join(_text(row.get(field)) for field in ('pname','cityname','adname','address')).replace(key,'[已隐藏]')
+        rows.append({'name':name,'address':address,'coordinate':coordinate,'city':_text(row.get('cityname')).replace(key,'[已隐藏]'),
+                     'longitude':lng,'latitude':lat})
+    return rows
+
+
+def search_places(query,data_dir):
+    """Return configured AMap candidates, or None when the legacy lookup applies."""
+    with _LOCK:data=_load(data_dir)
+    if data.get('provider')!='amap' or not data.get('enabled') or not data['keys'].get('amap'):return None
+    base={'query':query,'results':[],'provider':'amap','source':'高德地图','source_url':'https://www.amap.com/',
+          'coordinate_system':'GCJ-02'}
+    try:
+        rows=_amap_pois(query,data['keys']['amap'])
+        for row in rows:
+            row['url']='https://uri.amap.com/marker?'+urllib.parse.urlencode({'position':row['coordinate'],'name':row['name'],'src':'ruannuo-xiaoxiang','coordinate':'gaode','callnative':0})
+        return {**base,'status':'ok','results':rows,'queried_at':int(time.time()),
+                'detail':'高德地点候选，请核对名称与地址；点击候选在高德地图查看。未获取当前位置。' if rows else '高德未返回地点候选，请补充城市、校区或车站全名。'}
+    except Exception:
+        return {**base,'status':'unavailable','detail':'高德地点服务未完成查询，请检查Key权限、配额或网络；未切换其他平台。'}
+
+
+def _amap_landmark(address,key):
+    rows=_amap_pois(address,key)
     normalize=lambda value:re.sub(r'[\s()（）·-]','',value)
     query=normalize(address)
-    matches=[row for row in raw.get('pois',[]) if isinstance(row.get('name'),str) and len(normalize(row['name']))>=4 and query.endswith(normalize(row['name']))]
+    matches=[row for row in rows if len(normalize(row['name']))>=4 and
+             (query.endswith(normalize(row['name'])) or query in (normalize(row['name']+row['address']),normalize(row['address']+row['name'])))]
     if len(matches)!=1:
-        names='、'.join(_text(row.get('name')) for row in raw.get('pois',[])[:3])
+        names='；'.join(row['name']+' · '+row['address'] for row in rows[:3])
         raise LookupError('地点尚未唯一匹配，请补充校门、车站或区县。'+('候选：'+names if names else ''))
-    row=matches[0];coordinate=row.get('location','')
-    if not isinstance(coordinate,str) or not re.fullmatch(r'-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?',coordinate):raise RuntimeError('invalid coordinates')
-    return {'coordinate':coordinate,'label':_text(row['name'])+'（'+_text(row.get('cityname'))+'）','city':_text(row.get('cityname'))}
+    row=matches[0]
+    return {'coordinate':row['coordinate'],'label':row['name']+'（'+row['city']+'）','city':row['city']}
 
 
 def _baidu_geocode(address, key):

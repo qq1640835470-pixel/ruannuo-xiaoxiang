@@ -1,7 +1,7 @@
 """Optional community NetEase adapter. Cookies DPAPI encrypted; never sent to an LLM."""
 from __future__ import annotations
 import app_paths
-import json,os,pathlib,re,subprocess,threading,time,urllib.parse
+import json,os,pathlib,random,re,subprocess,threading,time,urllib.parse
 import providers,runtime_log
 ROOT=pathlib.Path(__file__).resolve().parent
 DATA=app_paths.DATA
@@ -80,6 +80,21 @@ def search(query):
     result=body.get('result') or {}
     songs=result.get('songs') or []
     return {'tracks':[{'id':s.get('id'),'name':str(s.get('name',''))[:160],'artists':' / '.join(str(a.get('name','')) for a in s.get('ar',s.get('artists',[])))[:160],'duration_ms':s.get('dt',s.get('duration',0))} for s in songs[:30]],'detail':'搜索结果最多30首；播放遵循账号会员、版权和地区权限。'}
+
+
+def recommend(query,count=5):
+    if not isinstance(query,str) or not 1<=len(query.strip())<=100 or not isinstance(count,int) or not 1<=count<=20:raise ValueError('请提供音乐风格和1至20首的数量。')
+    body=rpc('cloudsearch',{'keywords':query.strip(),'type':1000,'limit':5,'offset':0})['body']
+    playlists=(body.get('result') or {}).get('playlists') or []
+    playlist=next((p for p in playlists if re.fullmatch(r'[1-9][0-9]{0,19}',str(p.get('id','')))),None)
+    if not playlist:return {'tracks':[],'detail':'平台没有返回符合关键词的歌单。'}
+    pool=[];seen=set()
+    for track in tracks(playlist['id'])['tracks']:
+        ident=str(track.get('id',''))
+        if not re.fullmatch(r'[1-9][0-9]{0,19}',ident) or ident in seen:continue
+        seen.add(ident);pool.append(track)
+    return {'tracks':random.sample(pool,min(count,len(pool))),'playlist':str(playlist.get('name',''))[:160],
+            'detail':'依据平台关键词歌单抽取曲目，风格由歌单描述提供，播放仍受账号及版权限制。'}
 
 
 def song_url(song_id):

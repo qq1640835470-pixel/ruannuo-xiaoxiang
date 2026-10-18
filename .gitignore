@@ -26,6 +26,8 @@ api-hub/balances.html
 **/private_user_profile.*
 **/handoff-backups/
 **/speech-cache/
+**/chat-attachments/
+**/feedback-target.json
 **/workspace-app-profile/
 **/workspace-remote-profile/
 **/local_adaptation.json

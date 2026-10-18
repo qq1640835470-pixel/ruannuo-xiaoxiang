@@ -14,6 +14,7 @@ def page(connection,query='',before=None,around=None,limit=30):
     rows=[dict(row) for row in connection.execute(sql,(*args,limit+1))];more=len(rows)>limit;rows=rows[:limit];rows.reverse()
     for row in rows:
         row['actions']=json.loads(row.get('actions') or '[]');row['execution']=json.loads(row.get('execution') or '[]')
+        row['attachments']=json.loads(row.get('attachments') or '[]')
         for action in row['actions']:
             latest=connection.execute('SELECT status,result FROM actions WHERE id=?',(action.get('id'),)).fetchone()
             if latest:action.update(dict(latest))
