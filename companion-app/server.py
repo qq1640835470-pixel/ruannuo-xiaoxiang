@@ -24,7 +24,8 @@ STATUSES=set(agent_state.STATUSES)
 DEFAULT_SETTINGS={'provider':'gemini','api_generation_enabled':True,'reminders_enabled':False,
     'budget_limit_cny':10.0,'voice_provider':'browser','theme':'sakura','display_name':'徐彧',
     'pet_ai_enabled':True,'pet_provider':'gemini','chat_models':providers.MODELS.copy(),'pet_models':providers.PET_MODELS.copy(),
-    'local_fallback_enabled':False,'routing_enabled':False,'routing_cheap_provider':'deepseek','routing_complex_provider':'gemini','budget_soft_alert_ratio':.8}
+    'local_fallback_enabled':False,'routing_enabled':False,'routing_cheap_provider':'deepseek','routing_complex_provider':'gemini','budget_soft_alert_ratio':.8,
+    'learning_model_config':{'mode':'follow','provider':'','model':''},'learning_selection_revision':0}
 
 def now(): return dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).isoformat(timespec='seconds')
 @contextlib.contextmanager
@@ -102,9 +103,12 @@ def configure_local(body):
     raise ValueError('不支持这项本地自我调整。')
 def settings():
     with connect() as c:s={r['key']:json.loads(r['value']) for r in c.execute('SELECT * FROM settings')}
+    s.setdefault('learning_model_config',DEFAULT_SETTINGS['learning_model_config'].copy())
+    s.setdefault('learning_selection_revision',0)
+    s['learning_local_models']=[{'id':ident,'label':row['label']} for ident,row in local_models.CATALOG.items()]
     for key,defaults in (('chat_models',providers.MODELS),('pet_models',providers.PET_MODELS)):
         s[key]={**defaults,**s.get(key,{})}
-    s['model']=((local_models.selection() if local_models.selection()!='auto' else '自动选择 4B / 8B') if local_runtime.status()['installed'] else '本地规则') if s['provider']=='local' else s.get('chat_models',providers.MODELS).get(s['provider'],'本地规则');s['pet_model']=s.get('pet_models',providers.PET_MODELS).get(s['pet_provider'],providers.PET_MODELS.get(s['pet_provider']));s['budget']=budget();s['local_preferences']=local_preferences();return s
+    s['model']=((local_models.selection() if local_models.selection()!='auto' else '自动选择 4B / 8B') if local_runtime.status()['installed'] else '本地规则') if s['provider']=='local' else s.get('chat_models',providers.MODELS).get(s['provider'],'本地规则');s['pet_model']=s.get('pet_models',providers.PET_MODELS).get(s['pet_provider'],providers.PET_MODELS.get(s['pet_provider']));s['budget']=budget();s['local_preferences']=local_preferences();s['learning_selection']=learning_selection(s);s['learning_model_rates']=providers.model_rates(s['learning_selection']['provider'],s['learning_selection']['model']);return s
 def budget():
     with connect() as c:
         row=c.execute('SELECT COALESCE(SUM(estimate_cny),0),COALESCE(SUM(reserved_cny),0),COUNT(*) FROM usage').fetchone()
@@ -185,26 +189,110 @@ def reminder_call(operation,body=None):
         return learning_reminders.write(c,operation,body,stamp)
 
 
-def learning_selection(s=None):
+def learning_selection(s=None,content=None):
     s=settings() if s is None else s
-    return {'provider':s['provider'],'model':local_models.selection() if s['provider']=='local' else s['chat_models'][s['provider']]}
+    config=s.get('learning_model_config',DEFAULT_SETTINGS['learning_model_config'])
+    provider=config['provider'] if config['mode']=='independent' else s['provider']
+    model=config['model'] if config['mode']=='independent' else local_models.selection() if provider=='local' else s.get('chat_models',providers.MODELS)[provider]
+    selected={'provider':provider,'model':model,'mode':config['mode'],'revision':s.get('learning_selection_revision',0)}
+    if provider=='local' and model=='auto':
+        selected['configured_model']='auto'
+        if content is not None:selected['model']=local_runtime.choose([{'role':'user','content':content}])['model']
+    return selected
+
+
+def validate_learning_selection(expected,s=None):
+    current=learning_selection(s)
+    if current.get('configured_model')=='auto' and isinstance(expected,dict) and expected.get('model') in local_models.CATALOG:
+        current['model']=expected['model']
+    if current!=expected:raise LearningError('selection_changed')
+    return current
+
+
+def validate_learning_config(value):
+    if not isinstance(value,dict) or set(value)!={'mode','provider','model'}:raise ValueError('学习模型配置无效。')
+    if value['mode']=='follow':return {'mode':'follow','provider':'','model':''}
+    if value['mode']!='independent':raise ValueError('学习模型模式无效。')
+    provider=value['provider'];model=value['model']
+    if not isinstance(provider,str):raise ValueError('学习模型提供方无效。')
+    if not isinstance(model,str) or not model.strip():raise ValueError('请指定准确的学习模型ID。')
+    if provider=='local':
+        if model not in local_models.CATALOG:raise ValueError('独立学习模型须指定准确本机型号。')
+    elif provider in providers.MODELS:model=providers.validate_model(provider,model)
+    else:raise ValueError('学习模型提供方无效。')
+    return {'mode':'independent','provider':provider,'model':model}
+
+
+def learning_generate(body):
+    if not isinstance(body,dict):raise ValueError('学习请求无效。')
+    expected=body.get('model_selection');payload={k:v for k,v in body.items() if k not in ('request_id','model_selection')}
+    call=learning_call(expected)
+    ident=agent_state.ident(body.get('request_id'));fingerprint=learning_adjustments.digest(body)
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        old=c.execute('SELECT fingerprint,response FROM agent_state_requests WHERE id=?',(ident,)).fetchone()
+        if old:
+            if old['fingerprint']!=fingerprint:raise ValueError('请求ID内容冲突。')
+            saved=json.loads(old['response'])
+            if saved.get('state')!='completed':raise LearningError(saved.get('category','pending'))
+            return saved['result']
+        c.execute('INSERT INTO agent_state_requests VALUES(?,?,?,?,?,?)',(ident,fingerprint,'{"state":"pending"}','learning_generation','',now()))
+    try:
+        result=learning.generate(payload,call,now()[:10])
+        with connect() as c:
+            c.execute('UPDATE agent_state_requests SET response=? WHERE id=?',(json.dumps({'state':'completed','result':result},ensure_ascii=False),ident))
+            if 'plan' in result:model_center.record(c,result['model'],'success',VERSION,task='learning_plan')
+        return result
+    except Exception as exc:
+        with connect() as c:c.execute('UPDATE agent_state_requests SET response=? WHERE id=?',(json.dumps({'state':'failed','category':learning_failure(exc)}),ident))
+        raise
+
+
+def learning_call(expected):
+    def call(*args):
+        if not isinstance(expected,dict):raise LearningError('selection_changed')
+        return learning_model(*args,expected_selection=expected)
+    return call
+
+
+def learning_model_preview(body):
+    if not isinstance(body,dict) or set(body)-{'operation','body','check_id'}:raise ValueError('学习模型预览参数无效。')
+    operation=body.get('operation');payload=body.get('body')
+    if not isinstance(payload,dict):raise ValueError('学习模型预览内容无效。')
+    if operation in ('analyze','plan'):
+        class PreviewReady(Exception):pass
+        captured=[]
+        def capture(content,*args):captured.append(content);raise PreviewReady()
+        try:learning.generate({**payload,'stage':operation},capture,now()[:10])
+        except PreviewReady:pass
+        content=captured[0]
+    elif operation=='check':
+        with connect() as c:selected,_,_=learning_checks.scope(c,payload)
+        content=json.dumps(selected,ensure_ascii=False)
+    elif operation=='evaluate':
+        with connect() as c:item=learning_checks.get(c,agent_state.ident(body.get('check_id')),False)
+        answers=learning_checks.validate_answers(item['questions'],payload.get('answers'))
+        content=json.dumps(learning_checks.evaluation_payload(item['questions'],answers),ensure_ascii=False)
+    else:raise ValueError('学习模型预览操作无效。')
+    return {'model':learning_selection(content=content)}
 
 
 def learning_model(content,instruction,max_tokens,*,expected_selection=None):
-    s=settings();provider=s['provider']
-    if expected_selection is not None and learning_selection(s)!=expected_selection:
-        raise ValueError('模型选择已变化，请重新预览并确认。')
-    if provider!='local' and not s['api_generation_enabled']:
-        raise ValueError('云模型生成已关闭，请在设置中启用或选择本机模型。')
-    history=[{'role':'user','content':content}]
-    if provider=='local':
-        if not local_runtime.status()['installed']:raise ValueError('尚无可用本机模型，请在设置中选择可用模型。')
-        selected=local_runtime.choose(history)['model']
-    else:selected=s['chat_models'][provider]
     if not CHAT_LOCK.acquire(blocking=False):raise ValueError('模型正在处理其他请求，请稍后重试。')
     try:
-        try:uid=reserve(provider,selected,envelope={'input_token_upper_bound':len((content+instruction).encode('utf-8'))+16000,'max_output_tokens':max_tokens})
-        except ValueError:raise LearningError('auth_quota',reason='budget') from None
+        with LOCK:
+            s=settings()
+            selection=validate_learning_selection(expected_selection,s) if expected_selection is not None else learning_selection(s,content)
+            provider=selection['provider'];selected=selection['model']
+            if provider!='local' and not s['api_generation_enabled']:
+                raise ValueError('云模型生成已关闭，请在设置中启用或选择本机模型。')
+            history=[{'role':'user','content':content}]
+            if provider=='local':
+                if not local_runtime.status()['installed']:raise ValueError('尚无可用本机模型，请在设置中选择可用模型。')
+                if selected=='auto':selected=local_runtime.choose(history)['model']
+                if not local_models.installed(selected):raise ValueError('所选学习本机模型尚未安装或校验，不会自动换模。')
+            try:uid=reserve(provider,selected,envelope={'input_token_upper_bound':len((content+instruction).encode('utf-8'))+16000,'max_output_tokens':max_tokens})
+            except ValueError:raise LearningError('auth_quota',reason='budget') from None
         usage=None
         try:
             result=providers.chat(provider,history,{},model=selected,allow_tools=False,instruction=instruction,max_output_tokens=max_tokens)
@@ -907,13 +995,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.permitted(True):return self.send(403,{'error':'请求来源或本机会话无效，请重新打开助手。'})
         try:
             b=self.body();p=urllib.parse.urlsplit(self.path).path
+            if method=='POST' and p=='/api/learning/model-preview':return self.send(200,learning_model_preview(b))
             if method=='POST' and p=='/api/learning/adjustments/preview':
                 if not isinstance(b,dict) or set(b)!={'selection'}:raise ValueError('预览参数无效。')
                 selected=learning_selection()
                 with connect() as c:result=learning_adjustments.preview(c,b['selection'],now()[:10],selected)
+                selected=learning_selection(content=json.dumps(result['payload'],ensure_ascii=False))
+                result['model']=selected;result['preview_hash']=learning_adjustments.digest([result['payload'],selected])
                 return self.send(200,result)
             if method=='POST' and p=='/api/learning/adjustments/generate':
-                selected=learning_selection()
+                selected=b.get('model')
                 call=lambda content,instruction,tokens:learning_model(content,instruction,tokens,expected_selection=selected)
                 return self.send(200,learning_adjustments.generate(connect,b,now()[:10],selected,call))
             if method=='POST' and p=='/api/learning/adjustments/confirm':
@@ -925,13 +1016,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with connect() as c:result=learning_adjustments.cancel(c,match[1])
                 return self.send(200,result)
             if method=='POST' and p=='/api/learning/checks':
-                return self.send(200,learning_checks.execute(connect,'generate',b,learning_model))
+                call=learning_call(b.get('model_selection'))
+                return self.send(200,learning_checks.execute(connect,'generate',b,call))
             match=re.fullmatch(r'/api/learning/checks/([A-Za-z0-9_-]{1,64})(?:/(submit))?',p)
             if match:
                 ident,submit=match.groups()
                 operation='submit' if method=='POST' and submit else 'correct' if method=='PATCH' and not submit else 'delete' if method=='DELETE' and not submit else None
                 if not operation:raise ValueError('不支持此测验操作。')
-                return self.send(200,learning_checks.execute(connect,operation,b,learning_model,ident))
+                call=learning_call(b.get('model_selection'))
+                return self.send(200,learning_checks.execute(connect,operation,b,call,ident))
             if method=='POST' and p=='/api/models/center':
                 with LOCK,connect() as c:result=model_center.write(c,b,VERSION)
                 return self.send(200,result)
@@ -939,10 +1032,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='POST' and p=='/api/learning/reminders/action':return self.send(200,reminder_call('action',b))
             if method=='PATCH' and p=='/api/learning/reminders/settings':return self.send(200,reminder_call('settings',b))
             if method=='POST' and p=='/api/learning/generate':
-                result=learning.generate(b,learning_model,now()[:10])
-                if 'plan' in result:
-                    with connect() as c:model_center.record(c,result['model'],'success',VERSION,task='learning_plan')
-                return self.send(200,result)
+                return self.send(200,learning_generate(b))
             if method=='POST' and p=='/api/learning/confirm':return self.send(200,learning_save(b))
             if method=='POST' and p=='/api/chat/attachments':return self.send(200,chat_attachments.store(b,DATA))
             if method=='PATCH' and p=='/api/feedback-target':return self.send(200,feedback_bridge.configure(b,DATA))
@@ -953,7 +1043,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='POST' and p=='/api/local/maintenance':return self.send(200,configure_local(b))
             if method=='POST' and p=='/api/local/model/control':
                 if b.get('operation')=='select':
-                    local_models.select(b.get('model'));return self.send(200,local_runtime.status())
+                    with LOCK:
+                        selected=learning_selection()
+                        if selected['mode']=='follow' and selected['provider']=='local' and b.get('model')!=local_models.selection():
+                            # Invalidate before the separate file write so interruption cannot revive old consent.
+                            with connect() as c:c.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',('learning_selection_revision',json.dumps(selected['revision']+1)))
+                        local_models.select(b.get('model'))
+                    return self.send(200,local_runtime.status())
                 if b.get('operation')!='stop':raise ValueError('仅支持选择或释放本机模型。')
                 if CHAT_LOCK.locked() or PET_LOCK.locked():raise ValueError('回复正在生成，请完成后再释放模型。')
                 local_runtime.stop();return self.send(200,local_runtime.status())
@@ -1010,6 +1106,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self.send(200,state_write('tasks','delete',b,tid))
             if method=='PATCH' and p=='/api/settings':
                 updates={}
+                if 'learning_model_config' in b:updates['learning_model_config']=validate_learning_config(b['learning_model_config'])
                 if 'provider' in b:
                     if b['provider'] not in ('local',*providers.MODELS):raise ValueError('提供方无效')
                     updates['provider']=b['provider']
@@ -1047,12 +1144,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for provider,model in b[purpose].items():merged[provider]=providers.validate_model(provider,model)
                     updates[purpose]=merged
                 if b.get('reminders_enabled'):raise ValueError('本版暂未实现系统提醒，不能启用。')
-                with connect() as c:
-                    for k,v in updates.items():c.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps(v),k))
+                with LOCK,connect() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    before={r['key']:json.loads(r['value']) for r in c.execute('SELECT * FROM settings')}
+                    after={**before,**updates}
+                    if learning_selection(before)!=learning_selection(after):
+                        updates['learning_selection_revision']=before.get('learning_selection_revision',0)+1
+                    for k,v in updates.items():c.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(k,json.dumps(v),))
                     selected_provider=updates.get('provider',json.loads(c.execute("SELECT value FROM settings WHERE key='provider'").fetchone()[0]))
                     if selected_provider=='openrouter':
                         selected_models=updates.get('chat_models',json.loads(c.execute("SELECT value FROM settings WHERE key='chat_models'").fetchone()[0]))
                         model_center.recent(c,selected_models.get('openrouter',''))
+                    selected=learning_selection(after)
+                    if selected['provider']=='openrouter':model_center.recent(c,selected['model'])
                 return self.send(200,settings())
             if method=='POST' and p=='/api/balances/refresh':return self.send(200,balances(True))
             if method=='POST' and p.startswith('/api/actions/') and p.endswith('/execute'):

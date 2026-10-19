@@ -14,7 +14,7 @@
     try{await action();}catch(e){status(e.message||'本次检验操作未完成。');}
     finally{busy=false;area.removeAttribute('aria-busy');}
   }
-  function providerLabel(){const s=state.settings;return `${s.provider||'当前提供方'} / ${s.model||s.chat_models?.[s.provider]||'设置中所选型号'}`;}
+  function providerLabel(){return window.XYLearning?.label(state.settings.learning_selection)||'正在读取学习模型';}
   function preview(){
     const box=$('#check-selection');box.replaceChildren();
     box.append(node('p',`当前模型：${providerLabel()}。仅发送下列所选范围；云模型可能计费。不会附带聊天、画像、进度备注或历史检验。`));
@@ -47,7 +47,7 @@
     const box=$('#check-current');box.replaceChildren();if(!active)return;
     box.append(node('h3',`本次检验 · ${active.scope.title}`));
     box.append(node('p',`范围：${active.scope.content}\n预期成果：${active.scope.outcome||'自选知识点'}\n生成：${active.created_at} · 题目版本 ${active.schema_version}`));
-    box.append(node('p',`出题模型：${active.generation_model.provider} / ${active.generation_model.returned_model||active.generation_model.requested_model||'未知'}。题目、参考答案和范围相关性仍可人工核对。`,'muted-text'));
+    box.append(node('p',`出题模型：${active.generation_model.provider} · 请求 ${active.generation_model.requested_model||'未知'} → 返回 ${active.generation_model.returned_model||'未知'}。题目、参考答案和范围相关性仍可人工核对。`,'muted-text'));
     const submitted=active.status==='submitted',form=node('form');
     for(const q of active.questions){
       const card=node('fieldset',undefined,'learning-task');card.dataset.question=q.id;
@@ -82,11 +82,11 @@
       for(const r of review){const q=active.questions.find(q=>q.id===r.id);box.append(node('p',`第${r.id}题 · ${q.evidence}：${corrections[r.id]?.note||r.missing||r.basis}`));}
       box.append(node('p','下次复习建议：先回忆所选知识点，再核对上述题目与解释；无法确认的结论请查阅教材或向老师求证。不会自动改计划或新增任务。'));
       if(active.evaluation_model.status==='failed')box.append(node('p',active.evaluation_model.note));
-      if(active.evaluation_model.provider)box.append(node('p',`辅助评价模型：${active.evaluation_model.provider} / ${active.evaluation_model.returned_model||active.evaluation_model.requested_model}`));
+      if(active.evaluation_model.provider)box.append(node('p',`辅助评价模型：${active.evaluation_model.provider} · 请求 ${active.evaluation_model.requested_model||'未知'} → 返回 ${active.evaluation_model.returned_model||'未知'}`));
     }else{
       const label=node('label',`允许将本次简答题、参考要点和我的答案发送给当前所选模型辅助评价（${providerLabel()}；可能计费，一次调用）`,'check-option'),consent=node('input');consent.type='checkbox';consent.id='check-evaluate';label.prepend(consent);form.append(label);
       const submit=node('button','提交答案并保存结果','primary-button');submit.type='submit';form.append(submit);
-      form.onsubmit=e=>{e.preventDefault();run(async()=>{await write(`/api/learning/checks/${active.id}/submit`,'POST',{answers,evaluate_short:consent.checked});});};
+      form.onsubmit=e=>{e.preventDefault();run(async()=>{const body={answers:structuredClone(answers),evaluate_short:consent.checked};if(consent.checked)body.model_selection=await window.XYLearning.confirm('evaluate',body,active.id);await write(`/api/learning/checks/${active.id}/submit`,'POST',body);});};
     }
     if(pending)form.querySelectorAll('input,textarea,select,button').forEach(n=>n.disabled=true);
     box.append(form);
@@ -103,11 +103,12 @@
   $('#check-topic-mode').onclick=()=>{if(pending){status('请先核对待处理请求。');return;}selected=null;preview();};
   $('#check-generate').onsubmit=e=>{e.preventDefault();run(async()=>{
     const body=selected?{task_id:selected.id,scope_snapshot:{title:selected.title,content:selected.learning.content,outcome:selected.learning.outcome}}:{topic:$('#check-topic').value};body.count=Number($('#check-count').value);
-    status('正在生成；失败不会自动重试或切换模型。');await write('/api/learning/checks','POST',body);
+    body.model_selection=await window.XYLearning.confirm('check',body);status('正在生成；失败不会自动重试或切换模型。');await write('/api/learning/checks','POST',body);
   });};
   $('#check-refresh').onclick=()=>run(refresh);
   let restoreId=null;
   try{const saved=JSON.parse(localStorage.getItem(key)||'null');if(saved){pending=saved.pending;answers=saved.answers||{};restoreId=saved.activeId;}}catch{status('本机待处理请求无法恢复，请先查看历史。');}
+  window.addEventListener('learning-model-changed',()=>{preview();render();});
   preview();pendingView();window.addEventListener('learning-open',()=>run(async()=>{preview();await refresh();}));
   if(restoreId||location.hash==='#learning')run(async()=>{await refresh();if(restoreId){active=await api(`/api/learning/checks/${restoreId}`);render();}});
 })();

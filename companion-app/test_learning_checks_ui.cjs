@@ -8,7 +8,7 @@ const base=process.argv[2];if(!base)throw new Error('Use the isolated Python run
   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[],writes=[];
   let loseGenerate=true,loseSubmit=true;
   page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
-  const html=fs.readFileSync(path.join(__dirname,'web/index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>','<script src="/app.js"></script><script src="/learning.js"></script><script src="/learning-checks.js"></script></body>');
+  const html=fs.readFileSync(path.join(__dirname,'web/index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>','<script src="/app.js"></script><script src="/learning-model-settings.js"></script><script src="/learning.js"></script><script src="/learning-checks.js"></script></body>');
   await page.route('**/*',async route=>{
    const req=route.request(),u=new URL(req.url());
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});

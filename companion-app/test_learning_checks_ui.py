@@ -14,7 +14,7 @@ from test_learning_checks import QUESTIONS
 
 if __name__=='__main__':
     calls=[]
-    def model(content,instruction,tokens):
+    def model(content,instruction,tokens,**kwargs):
         calls.append(json.loads(content))
         if isinstance(calls[-1],list):
             return json.dumps({'feedback':[{'id':'3','verdict':'needs_review','basis':'需要节点电压定义','missing':'遗漏定义','improvement':'先写变量定义'}]}),{'provider':'fixture','returned_model':'synthetic-judge'}

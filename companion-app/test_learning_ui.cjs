@@ -6,11 +6,11 @@ const base=process.argv[2];if(!base)throw new Error('Run through test_learning_u
  const browser=await chromium.launch({channel:'msedge',headless:true});
  try{
   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[],confirmCalls=[];let malformed=false,failed=false,loseReceipt=false,failWrite=false;
-  page.on('pageerror',e=>errors.push(e.message));
+  page.on('dialog',d=>d.accept());page.on('pageerror',e=>errors.push(e.message));
   const today=new Date().toLocaleDateString('sv-SE'),end=new Date();end.setDate(end.getDate()+1);const tomorrow=end.toLocaleDateString('sv-SE');
   const req={course:'电路分析',scope:'节点法与直流电路',start_date:today,deadline:tomorrow,daily_minutes:120,level:'尚不清楚'};
   const plan={requirements:req,title:'两天电路复习',outcome:'写出解题过程与疑问',tasks:[{title:'复习节点法',content:'回看已有笔记',date:today,minutes:40,outcome:'列出方程',kind:'review'},{title:'练习节点法',content:'用已有例题练习',date:tomorrow,minutes:50,outcome:'保留解题过程',kind:'practice'}]};
-  const html=fs.readFileSync(path.join(__dirname,'web/index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>','<script src="/app.js"></script><script src="/learning.js"></script></body>');
+  const html=fs.readFileSync(path.join(__dirname,'web/index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>','<script src="/app.js"></script><script src="/learning-model-settings.js"></script><script src="/learning.js"></script></body>');
   await page.route('**/*',async route=>{
    const u=new URL(route.request().url()),body=route.request().postDataJSON();
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});

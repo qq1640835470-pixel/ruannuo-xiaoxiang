@@ -49,7 +49,7 @@ class LearningTests(unittest.TestCase):
     def count(self,table):
         with server.connect() as c:return c.execute('SELECT count(*) FROM '+table).fetchone()[0]
 
-    def model(self,content,instruction,tokens):
+    def model(self,content,instruction,tokens,**kwargs):
         return json.dumps({k:v for k,v in PLAN.items() if k!='requirements'},ensure_ascii=False),{'provider':'fixture','returned_model':'fake'}
 
     def test_analyze_missing_information_then_generate_without_saving(self):
@@ -163,10 +163,10 @@ class LearningTests(unittest.TestCase):
         with server.connect() as c:self.assertEqual(c.execute('SELECT status FROM usage').fetchone()[0],'unknown')
 
     def test_local_model_no_memory_no_auto_switch_no_tools(self):
-        with patch('server.settings',return_value={'provider':'local'}),patch('local_runtime.status',return_value={'installed':True}),patch('local_runtime.choose',return_value={'model':'manual-local'}),patch('providers.chat',return_value={'text':'{}','usage':{'estimate_cny':0},'model':'manual-local'}) as call:
+        with patch('server.settings',return_value={'provider':'local'}),patch('local_runtime.status',return_value={'installed':True}),patch('local_models.selection',return_value='auto'),patch('local_models.installed',return_value=True),patch('local_runtime.choose',return_value={'model':'manual-local'}),patch('providers.chat',return_value={'text':'{}','usage':{'estimate_cny':0},'model':'manual-local'}) as call:
             server.learning_model('request','instruction',8192)
             self.assertEqual(call.call_args.kwargs['model'],'manual-local');self.assertEqual(call.call_args.args[0],'local')
-        with patch('local_runtime.choose',return_value={'model':'manual-local'}),patch('local_runtime._chat_once',side_effect=ValueError('invalid')) as one:
+        with patch('local_models.selection',return_value='auto'),patch('local_models.installed',return_value=True),patch('local_runtime.choose',return_value={'model':'manual-local'}),patch('local_runtime._chat_once',side_effect=ValueError('invalid')) as one:
             with self.assertRaises(ValueError):local_runtime.chat([{'role':'user','content':'x'}],{},instruction='JSON',max_output_tokens=8192)
             self.assertEqual(one.call_count,1);self.assertEqual(one.call_args.args[1],{})
 
@@ -175,6 +175,9 @@ class LearningTests(unittest.TestCase):
         srv=http.server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);thread=threading.Thread(target=srv.serve_forever,daemon=True);thread.start()
         base=f'http://127.0.0.1:{srv.server_port}';opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()));opener.open(base+'/').close()
         def request(path,body=None,method='GET',headers=None):
+            if method=='POST' and body is not None and (path in ('/api/learning/generate','/api/learning/checks') or path.endswith('/submit') and body.get('evaluate_short')):
+                body={**body,'model_selection':body.get('model_selection',server.learning_selection())}
+                body.setdefault('request_id',__import__('uuid').uuid4().hex)
             req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,method=method,headers={'Content-Type':'application/json',**(headers or {})})
             with opener.open(req) as r:return json.load(r)
         try:yield base,request

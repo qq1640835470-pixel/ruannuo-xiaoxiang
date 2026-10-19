@@ -3,6 +3,7 @@ import sqlite3
 import urllib.error
 
 MESSAGES={
+ 'selection_changed':('学习模型选择已变化','请重新预览并明确确认，未自动换模。'),
  'model_request':('模型请求失败，未生成计划或测验','检查连接后，由你决定是否发起新请求。'),
  'auth_quota':('认证、权限或额度不足','在本机核对账号、DPAPI Key和额度，不要把Key贴到聊天。'),
  'parameters':('模型参数或上下文不兼容','核对目录能力与输出预算；不会自动改模型或重试。'),

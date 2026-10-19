@@ -6,8 +6,8 @@ const base=process.argv[2];if(!base)throw new Error('Use the isolated Python run
  const browser=await chromium.launch({channel:'msedge',headless:true});
  try{
   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[],generated=[],saved=[];let loseGenerate=false,loseSave=false,failSave=false;
-  page.on('pageerror',e=>errors.push(e.message));
-  const html=fs.readFileSync(path.join(__dirname,'web/index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>','<script src="/app.js"></script><script src="/learning.js"></script><script src="/learning-checks.js"></script><script src="/learning-adjustments.js"></script></body>');
+  page.on('dialog',d=>d.accept());page.on('pageerror',e=>errors.push(e.message));
+  const html=fs.readFileSync(path.join(__dirname,'web/index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>','<script src="/app.js"></script><script src="/learning-model-settings.js"></script><script src="/learning.js"></script><script src="/learning-checks.js"></script><script src="/learning-adjustments.js"></script></body>');
   await page.route('**/*',async route=>{
    const req=route.request(),u=new URL(req.url());
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});

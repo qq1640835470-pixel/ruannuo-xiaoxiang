@@ -12,6 +12,7 @@
   function check(parent,text,value=false){const label=node('label',text,'check-option'),input=node('input');input.type='checkbox';input.checked=value;label.prepend(input);parent.append(label);return input;}
   function input(parent,label,value,type,max,change){const wrap=node('label',label),n=node(type==='textarea'?'textarea':'input');if(type!=='textarea')n.type=type;n.value=value??'';n.maxLength=max;n.required=true;if(type==='number'){n.min=1;n.max=720;n.step=1;}n.oninput=()=>{change(type==='number'?Number(n.value):n.value);persist();compare();};wrap.append(n);parent.append(wrap);return n;}
   function invalidate(){view=null;$('#adjustment-preview').replaceChildren();}
+  window.addEventListener('learning-model-changed',()=>{if(view){invalidate();status('学习模型已变化，请重新预览并确认。');}});
   function selectionForm(){
     const box=$('#adjustment-selection');box.replaceChildren();if(!context||draft)return;
     box.append(node('h4',`调整目标：${context.original.title}`),node('p','本版在原计划日期与每日预算内调整；已完成项锁定，已有计划允许休息日。'));
@@ -65,7 +66,7 @@
   function editor(){
     const box=$('#adjustment-draft');box.replaceChildren();if(!draft)return;
     if(draft.state!=='draft'){box.append(node('p',draft.state==='confirmed'?'此调整已实际保存，可查看下方确认记录。':'此调整未形成有效草稿或已取消。'));return;}
-    box.append(node('h4','调整草稿 · 尚未保存'),node('p',`模型建议：${draft.proposal.summary}`),node('p',`生成模型：${draft.model.provider} / ${draft.model.returned_model||draft.model.requested_model}`));
+    box.append(node('h4','调整草稿 · 尚未保存'),node('p',`模型建议：${draft.proposal.summary}`),node('p',`生成模型：${draft.model.provider} · 请求 ${draft.model.requested_model||'未知'} → 返回 ${draft.model.returned_model||'未知'}`));
     box.append(node('div',undefined));box.lastChild.id='adjustment-comparison';compare();
     const form=node('form'),lock=node('fieldset');lock.disabled=Boolean(pending);lock.style.minWidth='0';form.append(lock);
     changes.forEach((c,index)=>{

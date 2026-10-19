@@ -66,7 +66,7 @@ def catalogue(c,version):
         ident=row['id'];inp,out=price(row,'prompt'),price(row,'completion')
         quiz=ability(row,4096,8192);plan=ability(row,8192,16384)
         records=[r for r in prefs['records'] if r['model_id']==ident]
-        real=[r for r in records if r['origin']=='real' and r['outcome']=='success' and r['task']=='learning_check']
+        real=[r for r in records if r['origin']=='real' and r['outcome']=='success' and r['task']=='learning_check' and r.get('returned_model')==ident]
         verified=next((r for r in real if r['app_version']==version and r['rules']==RULES and r['signature']==signature(ident,row)),None)
         state='本机已验证（用户确认真实出题）' if verified else '旧验证可能过期' if real else '模拟测试成功，尚未真实验证' if any(r['origin']=='simulated' and r['outcome']=='success' for r in records) else '候选，尚未验证' if quiz['state']=='candidate' else '待验证'
         tags=[]
@@ -108,8 +108,10 @@ def write(c,body,version):
         if any(r.get('check_id')==check_id and r['origin']=='simulated' for r in value['records']):raise ValueError('模拟测试记录不能标为真实验证。')
         model=json.loads(row[0])
         if model.get('provider')!='openrouter' or not providers.valid_openrouter_id(model.get('requested_model')):raise ValueError('此测验没有可核对的OpenRouter请求型号。')
+        if model.get('returned_model')!=model['requested_model']:raise ValueError('请求与返回型号不一致或返回型号未知，不能标记此型号已验证。请人工核对别名或上游回执。')
         prior=next((r for r in value['records'] if r.get('check_id')==check_id and r['task']=='learning_check' and r['outcome']=='success'),None)
         if not prior:raise ValueError('旧测验没有可核对的测试版本记录，请勿当作当前规则的真实验证。')
+        if prior['model_id']!=model['requested_model'] or prior['returned_model']!=model['returned_model']:raise ValueError('测验与验证记录型号不一致，不能归属验证。')
         confirmed={**prior,'origin':'real','confirmed_at':agent_state.now()}
         value['records']=[confirmed]+value['records'][:199]
         store(c,value)

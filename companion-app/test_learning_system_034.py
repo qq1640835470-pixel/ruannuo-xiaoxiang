@@ -122,6 +122,9 @@ class Fixture:
         return self
 
     def request(self,path,body=None,method='GET'):
+        if method=='POST' and body is not None and (path in ('/api/learning/generate','/api/learning/checks') or path.endswith('/submit') and body.get('evaluate_short')):
+            body={**body,'model_selection':body.get('model_selection',server.learning_selection())}
+            body.setdefault('request_id',__import__('uuid').uuid4().hex)
         request=urllib.request.Request(self.base+path,data=json.dumps(body,ensure_ascii=False).encode() if body is not None else None,method=method,headers={'Content-Type':'application/json'})
         with self.opener.open(request) as reply:return json.load(reply)
 

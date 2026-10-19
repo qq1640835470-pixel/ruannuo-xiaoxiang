@@ -6,11 +6,11 @@
   const labels={course:'课程',scope:'学习范围（具体章节或主题）',start_date:'开始日期',deadline:'截止日期',daily_minutes:'每天可用分钟',level:'当前基础（不清楚可填“尚不清楚”）'};
   const kinds={study:'学习',review:'复习',practice:'练习'};
   const statuses={pending:'待开始',active:'进行中',paused:'暂停',deferred:'已延期',done:'完成',cancelled:'取消'};
-  let draft=null, busy=false, pendingRecord=null, focusTaskId=null, pendingTask=null, taskFeedback=null;
+  let draft=null, busy=false, pendingRecord=null, focusTaskId=null, pendingTask=null, pendingGeneration=null, taskFeedback=null;
   function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
   function message(text){$('#learning-status').textContent=text;}
   function persist(){
-    try{localStorage.setItem(storageKey,JSON.stringify({draft,request:$('#learning-request').value,requirements:readRequirements(),pendingRecord,pendingTask,taskFeedback}));}
+    try{localStorage.setItem(storageKey,JSON.stringify({draft,request:$('#learning-request').value,requirements:readRequirements(),pendingRecord,pendingTask,pendingGeneration,taskFeedback}));}
     catch{message('浏览器未能保存草稿副本，请保持页面开启。');}
   }
   function field(parent,label,value,type='text',oninput=()=>{},max=500){
@@ -48,7 +48,7 @@
     area.append(node('h3',draft.goal_id?'修改已保存计划':'计划草稿 · 尚未保存'));
     area.append(node('p','移除已有任务会将其取消并保留历史；编辑保留任务状态和学习记录。','muted-text'));
     if(draft.uncertain)area.append(node('p','上次保存回执待核对。草稿已锁定，请重试确认保存以取得同一请求回执。'));
-    if(draft.model)area.append(node('p',`生成模型：${draft.model.provider} / ${draft.model.returned_model||draft.model.requested_model}`,'muted-text'));
+    if(draft.model)area.append(node('p',`生成模型：${draft.model.provider} · 请求 ${draft.model.requested_model||'未知'} → 返回 ${draft.model.returned_model||'未知'}`,'muted-text'));
     const form=node('form'),grid=node('div',undefined,'learning-grid');form.append(grid);
     field(grid,'目标名称',draft.plan.title,'text',v=>{draft.plan.title=v;touch();},200);
     field(grid,'预期成果',draft.plan.outcome,'textarea',v=>{draft.plan.outcome=v;touch();});
@@ -180,21 +180,40 @@
     if(focusTaskId){const target=root.querySelector(`[data-task-id="${CSS.escape(focusTaskId)}"]`);focusTaskId=null;if(target){const group=target.closest('details');if(group)group.open=true;target.tabIndex=-1;target.focus();target.scrollIntoView({block:'center'});}}
     window.dispatchEvent(new Event('learning-state-refreshed'));
   }
+  async function generate(body){
+    if(pendingGeneration)throw Error('上次学习生成回执待核，请先核对同一请求或结束跟踪。');
+    const model=await window.XYLearning.confirm(body.stage,body);
+    pendingGeneration={...body,model_selection:model,request_id:newRequest()};persist();generationRecovery();
+    return sendGeneration();
+  }
+  async function sendGeneration(){
+    let result;
+    try{result=await api('/api/learning/generate',{method:'POST',body:JSON.stringify(pendingGeneration)});}
+    catch(e){if(e.responseData){pendingGeneration=null;persist();generationRecovery();}throw e;}
+    pendingGeneration=null;persist();generationRecovery();return result;
+  }
+  function generationRecovery(){
+    let box=$('#learning-generation-pending');if(!box){box=node('div');box.id='learning-generation-pending';$('#learning-status').after(box);}box.replaceChildren();
+    if(!pendingGeneration)return;
+    box.append(node('p','生成回执待核；不自动重试付费调用。'));
+    button(box,'核对同一学习生成请求',async()=>{const stage=pendingGeneration.stage,r=await sendGeneration();if(stage==='analyze'){requirementsFields(r.requirements);$('#learning-questions').textContent=r.questions.join('；');}else{draft={plan:r.plan,model:r.model,request_id:newRequest()};editor();}persist();message('已恢复同一请求结果，未重复生成。');});
+    button(box,'结束学习生成跟踪',()=>{pendingGeneration=null;persist();generationRecovery();message('已结束跟踪；请先核对结果，再决定是否发起新请求。');});
+  }
   $('#learning-input').onsubmit=e=>{e.preventDefault();run(async()=>{
     if(draft)throw new Error('请先保存或取消当前草稿。');
-    message('正在分析学习需求…');const r=await api('/api/learning/generate',{method:'POST',body:JSON.stringify({stage:'analyze',text:$('#learning-request').value})});
+    message('正在分析学习需求…');const r=await generate({stage:'analyze',text:$('#learning-request').value});
     requirementsFields(r.requirements);$('#learning-questions').textContent=r.questions.join('；')||'请核对提取结果，特别是范围、截止日期与当前基础。';persist();message('需求分析完成，请补充并核对下列信息。');
   });};
   $('#learning-requirements').onsubmit=e=>{e.preventDefault();run(async()=>{
     if(draft)throw new Error('请先保存或取消当前草稿。');
-    message('正在生成计划草稿…');const r=await api('/api/learning/generate',{method:'POST',body:JSON.stringify({stage:'plan',requirements:readRequirements()})});
+    message('正在生成计划草稿…');const r=await generate({stage:'plan',requirements:readRequirements()});
     draft={plan:r.plan,model:r.model,request_id:newRequest()};persist();editor();message('草稿已生成，请编辑并确认保存。');
   });};
   window.addEventListener('learning-task-focus',event=>{focusTaskId=event.detail.task_id;run(refresh);});
   $('#learning-refresh').onclick=()=>run(refresh);
   $('#learning-request').addEventListener('input',persist);
   requirementsFields();
-  try{const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored){draft=stored.draft;pendingRecord=stored.pendingRecord;pendingTask=stored.pendingTask;taskFeedback=stored.taskFeedback;$('#learning-request').value=stored.request||'';requirementsFields(stored.requirements||{});}}catch{message('本机草稿无法恢复，请重新填写。');}
-  editor();window.addEventListener('learning-open',()=>run(refresh));
+  try{const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored){draft=stored.draft;pendingRecord=stored.pendingRecord;pendingTask=stored.pendingTask;pendingGeneration=stored.pendingGeneration;taskFeedback=stored.taskFeedback;$('#learning-request').value=stored.request||'';requirementsFields(stored.requirements||{});}}catch{message('本机草稿无法恢复，请重新填写。');}
+  generationRecovery();editor();window.addEventListener('learning-open',()=>run(refresh));
   if(location.hash==='#learning')changePage('learning');
 })();

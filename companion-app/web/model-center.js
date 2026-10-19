@@ -2,7 +2,8 @@
 (() => {
   const parent=document.getElementById('openrouter-settings');if(!parent)return;
   const panel=document.createElement('details');panel.id='model-center';panel.innerHTML='<summary>模型中心 · 搜索与筛选</summary>';
-  parent.append(panel);const status=document.createElement('p');status.role='status';panel.append(status);
+  parent.parentElement.after(panel);const status=document.createElement('p');status.role='status';panel.append(status);
+  const selections=document.createElement('p');selections.id='model-center-selections';panel.append(selections);
   let data=null,page=0,loadRevision=0;const size=24,fields={};
   const tags={all:'全部模型',chat:'日常聊天',learning:'学习计划与出题',reasoning:'数学与复杂推理（声明参数）',vision:'多模态/视觉（上游）',free:'免费模型',low_cost:'低成本模型',favorites:'收藏模型',recent:'最近使用'};
   function n(tag,text){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;}
@@ -59,7 +60,8 @@
     for(const row of rows.slice(page*size,(page+1)*size)){
       const card=n('article');card.className='model-card';card.dataset.modelId=row.id;
       card.append(n('h4',row.label||row.id),n('p',`准确ID：${row.id} · 厂商：${row.vendor}`),n('p',`输入 ${money(row.input_usd_million)}；输出 ${money(row.output_usd_million)}。目录价格非账单。`),n('p',`上下文 ${row.context_length??'未知'} · 最大输出 ${row.max_completion_tokens??'未知'} Token`),n('p',`声明参数：${(row.supported_parameters||[]).join('、')||'未知'}`),n('p',`上游模态：${(row.input_modalities||[]).join('/')||'未知'} → ${(row.output_modalities||[]).join('/')||'未知'}；当前仅文字输入，未适配OpenRouter图片直传。`),n('p',`已适配：${row.app_adapted.join('、')}；出题：${row.learning_check.reason}；计划：${row.learning_plan.reason}`),n('p',`JSON适配：${row.supported_parameters?.includes('response_format')?'使用已声明的JSON对象参数':'按文字请求并校验JSON，无自动参数重试'}；学习出题验证：${row.verification}`),n('p',`分类：${row.tags.map(t=>tags[t]).join('、')||'待验证'}`));
-      button(card,'选用此型号（再保存设置）',()=>{window.XYModels.selectChatModel('openrouter',row.id);status.textContent=`已选 ${row.id}，请保存设置；没有调用模型。`;});
+      button(card,'用作聊天模型（再保存设置）',()=>{window.XYModels.selectChatModel('openrouter',row.id);status.textContent=`已选 ${row.id}，请保存设置；没有调用模型。`;});
+      button(card,'用作学习模型（再保存设置）',()=>{window.XYLearning.selectModel('openrouter',row.id);status.textContent=`已选学习模型 ${row.id}，请保存设置；聊天选择未改变。`;});
       button(card,data.preferences.favorites.includes(row.id)?'取消收藏':'收藏',async()=>{await api('/api/models/center',{method:'POST',body:JSON.stringify({action:'favorite',model_id:row.id,favorite:!data.preferences.favorites.includes(row.id),request_id:crypto.randomUUID().replaceAll('-','')})});await load();});list.append(card);
     }
   }

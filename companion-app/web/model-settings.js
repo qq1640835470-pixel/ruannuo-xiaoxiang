@@ -48,7 +48,7 @@
   }
   function status() {
     const target = $('catalog-status'); if (!target) return;
-    const providers = [...new Set(kinds.map(kind => $(kind.provider)?.value).filter(p => p && p !== 'local'))];
+    const providers = [...new Set([...kinds.map(kind => $(kind.provider)?.value),window.XYLearning?.catalogueProvider()].filter(p => p && p !== 'local'))];
     target.hidden = !providers.length;
     if ($('catalog-refresh')) $('catalog-refresh').hidden = !providers.length;
     if (!providers.length) { target.textContent = ''; return; }
@@ -62,7 +62,7 @@
   async function load(refresh = false) {
     const current = ++revision;
     const button = $('catalog-refresh'); if (refresh) reading = true; if (button) button.disabled = reading;
-    const providers = [...new Set(kinds.map(kind => $(kind.provider)?.value).filter(p => p && p !== 'local'))];
+    const providers = [...new Set([...kinds.map(kind => $(kind.provider)?.value),window.XYLearning?.catalogueProvider()].filter(p => p && p !== 'local'))];
     const outcomes = await Promise.allSettled(providers.map(p => getCatalogue(p, refresh)));
     if (current === revision) {
       kinds.forEach(render); status();window.dispatchEvent(new Event("models-catalogue-updated"));
@@ -72,6 +72,7 @@
     if (refresh) reading = false; if (button) button.disabled = reading;
   }
   window.XYModels = {
+    getCatalogue,
     selectChatModel(provider,model) {
       remember(kinds[0]);maps.chat_models[provider]=model;$(kinds[0].provider).value=provider;active.chat=provider;render(kinds[0]);status();
       if($('settings-save-status'))$('settings-save-status').textContent=`已选 ${provider} / ${model}，请点击保存设置；尚未调用模型。`;
@@ -80,8 +81,9 @@
       maps = {chat_models:{...(settings.chat_models || {})}, pet_models:{...(settings.pet_models || {})}};
       kinds.forEach(kind => { active[kind.name] = $(kind.provider)?.value; render(kind); });
       status(); load();
+      window.XYLearning?.settingsLoaded(settings);
     },
-    savePayload() { kinds.forEach(remember); return Object.fromEntries(Object.entries(maps).map(([key, values]) => [key, Object.fromEntries(Object.entries(values).filter(([provider, value]) => provider !== 'local' && value))])); }
+    savePayload() { kinds.forEach(remember); return {...Object.fromEntries(Object.entries(maps).map(([key, values]) => [key, Object.fromEntries(Object.entries(values).filter(([provider, value]) => provider !== 'local' && value))])),...window.XYLearning?.savePayload()}; }
   };
   kinds.forEach(kind => {
     $(kind.provider)?.addEventListener('change', () => { remember(kind); active[kind.name] = $(kind.provider).value; render(kind); status(); load(); });

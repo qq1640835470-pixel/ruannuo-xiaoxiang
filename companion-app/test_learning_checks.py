@@ -30,7 +30,7 @@ class CheckTests(unittest.TestCase):
     count=fixtures.LearningTests.count
     http=fixtures.LearningTests.http
 
-    def model(self,*args):return json.dumps(QUESTIONS,ensure_ascii=False),{'provider':'fixture','returned_model':'synthetic'}
+    def model(self,*args,**kwargs):return json.dumps(QUESTIONS,ensure_ascii=False),{'provider':'fixture','returned_model':'synthetic'}
 
     def generate(self,request='gen1',**kw):
         if not kw:

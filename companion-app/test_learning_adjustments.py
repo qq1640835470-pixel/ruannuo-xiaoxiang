@@ -238,7 +238,7 @@ class AdjustmentTests(unittest.TestCase):
     def test_real_reservation_budget_guard_does_not_call_model(self):
         selected={'provider':'openrouter','chat_models':{'openrouter':MODEL['model']},'api_generation_enabled':True}
         with patch('server.settings',return_value=selected),patch('server.budget',return_value={'remaining_cny':0}),patch('providers.reservation',return_value=.1),patch('providers.chat',side_effect=AssertionError('No paid request')) as model:
-            with self.assertRaisesRegex(ValueError,'预算剩余不足'):server.learning_model('{}','JSON',8192,expected_selection=MODEL)
+            with self.assertRaisesRegex(ValueError,'预算剩余不足'):server.learning_model('{}','JSON',8192,expected_selection=server.learning_selection(selected))
             model.assert_not_called()
 
     def test_future_reminder_reader_no_notes_or_checks_and_confirmed_only(self):

@@ -55,6 +55,7 @@
       await api('/api/local/model/control', {method: 'POST', body: JSON.stringify(payload)});
       status.textContent = payload.operation === 'select' ? '本机模型选择已保存，下次本机请求时生效。' : '已释放本机模型占用。';
       await load();
+      if(payload.operation==='select')window.dispatchEvent(new Event('local-model-selection-changed'));
     } catch (error) {
       select.value = selection; status.textContent = `操作失败：${error.message}`;
     } finally { busy = false; controls(); }

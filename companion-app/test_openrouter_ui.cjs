@@ -19,7 +19,7 @@ const base=process.argv[2];if(!base)throw Error('Use test_openrouter_ui.py (isol
    return route.continue();
   });
   await page.context().request.get(base+'/');await page.goto(base+'/');await page.locator('#connection-status').filter({hasText:'已连接本机服务'}).waitFor();
-  await page.locator('#settings-open').click();await page.locator('#model-select').selectOption('openrouter');
+  await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/settings')&&r.request().method()==='GET'),page.locator('#settings-open').click()]);await page.waitForFunction(()=>document.querySelector('#model-select').value==='gemini'&&document.querySelector('#chat-model-id').options.length>0);await page.locator('#model-select').selectOption('openrouter');
   await page.locator('#openrouter-settings').waitFor({state:'visible'});
   await page.locator('#catalog-refresh').click();await page.waitForFunction(()=>document.querySelector('#chat-model-id option[value="vendor/test-model:free"]'));
   assert.match(await page.locator('#chat-model-id').textContent(),/Friendly name.*vendor\/test-model:free/);

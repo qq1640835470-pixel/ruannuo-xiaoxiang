@@ -173,7 +173,8 @@ def _chat_once(history,context,companion=False,model=None,tools=None,*,instructi
     if '<tool_call>' in text and not calls:raise ValueError('本地模型未生成可解析的结构化工具调用，未执行。')
     if not text and not calls:raise LearningError('empty_truncated')
     usage=result.get('usage') or {}
-    return {'text':text,'calls':calls,'model':selected_model,'usage':{'provider':'local','requested_model':selected_model,'returned_model':result.get('model',selected_model),'local_routing':routing,'input_tokens':usage.get('prompt_tokens'),'output_tokens':usage.get('completion_tokens'),'elapsed_seconds':round(time.monotonic()-started,3),'estimate_cny':0,'price_basis':'local_inference_no_cloud_charge','tools_enabled':bool(tools),**({'purpose':'pet_chat'} if companion else {})}}
+    returned_model=result.get('model') if instruction is not None else result.get('model',selected_model)
+    return {'text':text,'calls':calls,'model':returned_model if instruction is not None else selected_model,'usage':{'provider':'local','requested_model':selected_model,'returned_model':returned_model,'local_routing':routing,'input_tokens':usage.get('prompt_tokens'),'output_tokens':usage.get('completion_tokens'),'elapsed_seconds':round(time.monotonic()-started,3),'estimate_cny':0,'price_basis':'local_inference_no_cloud_charge','tools_enabled':bool(tools),**({'purpose':'pet_chat'} if companion else {})}}
 
 def translate(text,language):
     """Translate only supplied speech text locally, without persona, memory or tools."""

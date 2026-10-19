@@ -3,14 +3,14 @@ const assert=require('node:assert/strict');
 const {chromium}=require('C:/Users/16408/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const base=process.argv[2];if(!base?.startsWith('http://127.0.0.1:'))throw Error('Isolated data only');
 (async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
- const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.context().request.get(base+'/');await page.goto(base+'/');await page.locator('#connection-status').filter({hasText:'已连接本机服务'}).waitFor();
+ const page=await browser.newPage(),errors=[],failed=[];page.on('requestfailed',r=>failed.push({url:r.url(),error:r.failure()}));page.on('pageerror',e=>errors.push(e.message));await page.context().request.get(base+'/');await page.goto(base+'/');await page.locator('#connection-status').filter({hasText:'已连接本机服务'}).waitFor().catch(async e=>{console.error({status:await page.locator('#connection-status').textContent(),errors,failed,resources:await page.evaluate(()=>performance.getEntriesByType('resource').filter(r=>r.name.endsWith('/app.js')).map(r=>({name:r.name,size:r.transferSize}))) });throw e;});
  await page.locator('#settings-open').click();await page.locator('#model-center > summary').click();await page.locator('#model-center-list .model-card').first().waitFor();
  assert.equal(await page.locator('#model-center-list .model-card').count(),24);assert.ok(await page.locator('#chat-model-id option').count()<=102);
  await page.locator('#model-center-search').fill('model-1100');let card=page.locator('#model-center-list .model-card');assert.equal(await card.count(),1);assert.match(await card.textContent(),/vendor2\/model-1100/);
  await card.getByRole('button',{name:'收藏',exact:true}).click();await card.getByRole('button',{name:'取消收藏',exact:true}).waitFor();
- await card.getByRole('button',{name:'选用此型号（再保存设置）'}).click();assert.equal(await page.locator('#chat-model-id').inputValue(),'vendor2/model-1100');
+ await card.getByRole('button',{name:'用作聊天模型（再保存设置）'}).click();assert.equal(await page.locator('#chat-model-id').inputValue(),'vendor2/model-1100');
  await page.locator('#save-settings').click();await page.locator('#settings-save-status').filter({hasText:'设置已保存'}).waitFor();
- await page.reload();await page.locator('#connection-status').filter({hasText:'已连接本机服务'}).waitFor();await page.locator('#settings-open').click();await page.locator('#model-center > summary').click();await page.locator('#model-center-list .model-card').first().waitFor();
+ await page.reload();await page.locator('#connection-status').filter({hasText:'已连接本机服务'}).waitFor().catch(async e=>{console.error({status:await page.locator('#connection-status').textContent(),errors,failed,resources:await page.evaluate(()=>performance.getEntriesByType('resource').filter(r=>r.name.endsWith('/app.js')).map(r=>({name:r.name,size:r.transferSize}))) });throw e;});await page.locator('#settings-open').click();await page.locator('#model-center > summary').click();await page.locator('#model-center-list .model-card').first().waitFor();
  await page.locator('#model-center-tag').selectOption('favorites');assert.equal(await card.count(),1);assert.match(await card.textContent(),/model-1100/);
  await page.locator('#model-center-tag').selectOption('recent');assert.match(await card.textContent(),/model-1100/);
  await page.getByRole('button',{name:'切回全部模型',exact:true}).click();assert.equal(await card.count(),24);

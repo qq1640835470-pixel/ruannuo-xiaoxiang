@@ -8,7 +8,7 @@ const base=process.argv[2];if(!base?.startsWith('http://127.0.0.1:'))throw new E
  try{
   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[],writes=[];let losePlan=true,loseAdjustment=true;
   await page.context().request.get(base+'/');const marker=await page.context().request.get(base+'/api/acceptance-034');assert.equal(marker.ok(),true);assert.equal((await marker.json()).isolated_synthetic_fixture,true);
-  page.on('pageerror',e=>errors.push(e.message));
+  page.on('dialog',d=>d.accept());page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/api/learning/confirm',async route=>{writes.push({kind:'plan',body:route.request().postDataJSON()});if(losePlan){losePlan=false;await route.fetch();return route.abort('failed');}return route.continue();});
   await page.route('**/api/learning/adjustments/confirm',async route=>{writes.push({kind:'adjust',body:route.request().postDataJSON()});if(loseAdjustment){loseAdjustment=false;await route.fetch();return route.abort('failed');}return route.continue();});
   await page.goto(base+'/');await page.waitForFunction(()=>document.querySelector('#model-select')?.value==='openrouter');
