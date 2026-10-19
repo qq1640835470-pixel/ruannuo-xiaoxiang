@@ -1,6 +1,7 @@
 """Real HTTP model adapters. Never log secrets or raw API error bodies."""
 from __future__ import annotations
 import app_paths
+from learning_diagnostics import LearningError
 import datetime as dt, importlib.util, json, pathlib, urllib.request, urllib.error, urllib.parse, time, os, re, threading, math
 from dataclasses import dataclass
 from connectors import TOOLS
@@ -140,7 +141,9 @@ def normalize_models(provider,data):
             models[model]={'id':model,'label':str(row.get('name') or model)[:128],
                 'context_length':top.get('context_length') or row.get('context_length'),
                 'max_completion_tokens':top.get('max_completion_tokens'),
-                'supported_parameters':[p for p in params if p in ('max_tokens','max_completion_tokens','response_format','structured_outputs','tools','tool_choice')],
+                'supported_parameters':[p for p in params if isinstance(p,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}',p)],
+                'input_modalities':[m for m in architecture.get('input_modalities',[]) if m in ('text','image','audio','video')],
+                'output_modalities':[m for m in architecture.get('output_modalities',[]) if m in ('text','image','audio','video')],
                 'pricing':pricing,'protective_estimate_available':False,'tools_adapted':False}
             continue
         model=row.get('name','').removeprefix('models/') if provider=='gemini' else row.get('id','')
@@ -183,7 +186,7 @@ def model_catalogue(provider,refresh=False):
             temporary=CATALOG_PATH.with_suffix('.tmp');temporary.write_text(json.dumps(cache,ensure_ascii=False),encoding='utf-8');temporary.replace(CATALOG_PATH)
         fetched=record.get('fetched_at')
         stale=not fetched or (dt.datetime.now(dt.timezone.utc)-dt.datetime.fromisoformat(fetched)).total_seconds()>CATALOG_TTL
-        rows=[{**r,'protective_estimate_available':model_rates(provider,r['id']) is not None,'tools_adapted':r['id'] in TOOL_MODELS.get(provider,set())} for r in record.get('models',[])]
+        rows=[{**r,'protective_estimate_available':(metadata_rates(r.get('pricing',{})) if provider=='openrouter' else model_rates(provider,r['id'])) is not None,'tools_adapted':r['id'] in TOOL_MODELS.get(provider,set())} for r in record.get('models',[])]
         return {'provider':provider,'models':rows,'status':record.get('status','not_fetched'),
                 'fetched_at':fetched,'attempted_at':record.get('attempted_at'),'stale':stale,
                 'partial':record.get('partial',False),'http_status':record.get('http_status'),
@@ -198,14 +201,17 @@ def validate_model(provider,model):
     if model not in allowed:raise ValueError('请先读取提供方模型列表，再选择列表中的型号')
     return model
 
+def metadata_rates(pricing):
+    if set(pricing)!={'prompt','completion'}:return None
+    try:rates=tuple(float(pricing[k])*1000000*10 for k in ('prompt','completion'))
+    except (ValueError,TypeError,OverflowError):return None
+    return rates if all(math.isfinite(r) and r>=0 for r in rates) else None
+
+
 def model_rates(provider,model):
     if provider=='local':return (0,0)
     if provider=='openrouter':
-        pricing=openrouter_model(model).get('pricing',{})
-        if set(pricing)=={'prompt','completion'}:
-            rates=tuple(float(pricing[k])*1000000*10 for k in ('prompt','completion'))
-            if all(math.isfinite(r) and r>=0 for r in rates):return rates
-        return None
+        return metadata_rates(openrouter_model(model).get('pricing',{}))
     if model in ADDITIONAL_RATES.get(provider,{}):return ADDITIONAL_RATES[provider][model]
     if model==MODELS.get(provider):return PRICES[provider]
     if model==PET_MODELS.get(provider):return PET_PRICES[provider]
@@ -266,9 +272,9 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
     model=validate_model(provider,model or (PET_MODELS if companion else MODELS)[provider])
     try:keys=hub.load_keys()
     except Exception:
-        if provider=='openrouter':raise ValueError('请在设置中按 OpenRouter 凭据说明配置本机 DPAPI Key。') from None
+        if provider=='openrouter':raise LearningError('auth_quota') from None
         raise
-    if provider=='openrouter' and not keys.get(provider):raise ValueError('请在设置中按 OpenRouter 凭据说明配置本机 DPAPI Key。')
+    if provider=='openrouter' and not keys.get(provider):raise LearningError('auth_quota')
     tools_enabled=allow_tools and not companion and model in TOOL_MODELS.get(provider,set())
     # A small fixed context prevents growth in cost and exposure. Tools carry no raw files.
     hist=[];budget=12000
@@ -287,6 +293,7 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
         prompt+='\n本次型号未启用工具。只能提供文字建议；不得声称已记录反馈、任务或执行本机操作。'
     started=time.monotonic()
     runtime_log.event('model_started',provider=provider,requested_model=model)
+    output_issue=False;finish_reason=None
     if provider=='gemini':
         contents=[{'role':'model' if m['role']=='assistant' else 'user','parts':[{'text':m['content']}]} for m in hist]
         body={'systemInstruction':{'parts':[{'text':prompt}]},'contents':contents,
@@ -298,12 +305,14 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
         if tools_enabled:body['tools']=[{'functionDeclarations':gemini_tools(TOOLS)}]
         result=adapter.send(model,keys[provider],body)
         candidates=result.get('candidates',[])
-        if not candidates: raise ValueError('提供方未返回可用回复')
+        if not candidates: raise LearningError('empty_truncated')
+        finish_reason=candidates[0].get('finishReason')
+        output_issue=finish_reason in ('MAX_TOKENS','SAFETY','RECITATION','OTHER')
         parts=candidates[0].get('content',{}).get('parts',[])
         text='\n'.join(p['text'] for p in parts if 'text' in p and not p.get('thought'))
         calls=[{'name':p['functionCall']['name'],'args':p['functionCall'].get('args',{})} for p in parts if 'functionCall' in p]
         u=result.get('usageMetadata',{});tin=u.get('promptTokenCount');tout=u.get('candidatesTokenCount',0)+u.get('thoughtsTokenCount',0)
-        actual_model=result.get('modelVersion',model)
+        actual_model=result.get('modelVersion','unverified' if instruction is not None else model)
     else:
         body={'model':model,'messages':[{'role':'system','content':prompt}]+hist,
               'max_tokens':max_output_tokens or (256 if companion else 1536)}
@@ -313,27 +322,30 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
             metadata=openrouter_model(model);params=metadata.get('supported_parameters',[])
             output=body.pop('max_tokens')
             if metadata and not any(p in params for p in ('max_tokens','max_completion_tokens')):
-                raise ValueError('此模型未声明输出长度参数支持，请更换模型或刷新列表。')
+                raise LearningError('parameters')
             limit=metadata.get('max_completion_tokens')
-            if isinstance(limit,int) and output>limit:raise ValueError('所选模型输出长度上限不足，请换用支持更长输出的模型。')
+            if isinstance(limit,int) and output>limit:raise LearningError('parameters')
             context_limit=metadata.get('context_length')
             upper=len(json.dumps(body['messages'],ensure_ascii=False).encode('utf-8'))+output+256
-            if isinstance(context_limit,int) and upper>context_limit:raise ValueError('输入与输出预算可能超过所选模型上下文上限，请缩短输入或更换模型。')
+            if isinstance(context_limit,int) and upper>context_limit:raise LearningError('parameters')
             body['max_tokens' if not metadata or 'max_tokens' in params else 'max_completion_tokens']=output
             body['provider']={'require_parameters':True,'allow_fallbacks':False}
             if instruction is not None and 'response_format' in params:body['response_format']={'type':'json_object'}
         result=adapter.send(model,keys[provider],body)
         choices=result.get('choices',[])
-        if not choices: raise ValueError('提供方未返回可用回复')
-        if provider=='openrouter' and choices[0].get('finish_reason') in ('length','error','content_filter'):
-            raise ValueError('OpenRouter 回复被截断、过滤或生成失败，未作为完整结果采用；用量保留待核。')
+        if not choices: raise LearningError('empty_truncated')
+        finish_reason=choices[0].get('finish_reason')
+        output_issue=finish_reason in ('length','error','content_filter')
         m=choices[0]['message'];text=m.get('content') or '';calls=[]
+        if isinstance(text,list):text=''.join(p.get('text','') for p in text if isinstance(p,dict) and p.get('type') in ('text','output_text') and isinstance(p.get('text'),str))
+        if not isinstance(text,str):text=''
         for t in m.get('tool_calls',[]):
             calls.append({'name':t['function']['name'],'args':json.loads(t['function']['arguments'])})
         u=result.get('usage') or {};tin=u.get('prompt_tokens');tout=u.get('completion_tokens');actual_model=result.get('model',model)
         if provider=='openrouter':actual_model=result.get('model') if valid_openrouter_id(result.get('model')) else 'unverified'
     usage=dict(provider=provider,requested_model=model,returned_model=actual_model,input_tokens=tin,output_tokens=tout,
         elapsed_seconds=round(time.monotonic()-started,3),price_source_date=SOURCE_DATE)
+    if finish_reason in ('stop','length','error','content_filter','tool_calls','STOP','MAX_TOKENS','SAFETY','RECITATION','OTHER'):usage['finish_reason']=finish_reason
     rates=model_rates(provider,model)
     usage['price_basis']='protective_estimate_not_bill' if rates else 'unknown_price_reservation_retained'
     usage['tools_enabled']=tools_enabled
@@ -345,7 +357,7 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
     if rates and all(isinstance(n,int) and not isinstance(n,bool) and n>=0 for n in (tin,tout)):
         a,b=rates;usage['estimate_cny']=round((tin*a+tout*b)/1000000,6)
     if companion:usage.update(purpose='pet_chat')
-    if not text and not calls: raise ValueError('提供方返回空回复')
+    if output_issue or (not text.strip() and not calls):raise LearningError('empty_truncated',usage=usage)
     runtime_log.event('model_completed',**{k:usage[k] for k in ('provider','requested_model','returned_model','input_tokens','output_tokens','elapsed_seconds','estimate_cny') if k in usage})
     return {'text':text,'calls':calls[:3] if tools_enabled else [],'usage':usage,'model':actual_model}
 

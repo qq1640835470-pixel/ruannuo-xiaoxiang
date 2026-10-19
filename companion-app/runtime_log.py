@@ -7,7 +7,7 @@ _path=None
 _lock=threading.RLock()
 MAX_BYTES=1024*1024
 BACKUPS=3
-FIELDS={'request_id','method','route','status','duration_ms','error_type','http_status','provider',
+FIELDS={'category','operation','finish_reason','request_id','method','route','status','duration_ms','error_type','http_status','provider',
         'requested_model','returned_model','input_tokens','output_tokens','elapsed_seconds','estimate_cny',
         'routing_reason','selection_mode','gpu_layers','action_id','draft_id','feedback_id','source_id','app','kind','count','version','file','line','frames'}
 

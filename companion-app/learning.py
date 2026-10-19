@@ -2,6 +2,8 @@
 import datetime as dt
 import hashlib
 import json
+import re
+from learning_diagnostics import LearningError
 import agent_state
 
 MARKER = 'learning_mvp_v1'
@@ -138,12 +140,13 @@ def save(c, body, *, begin=True, preserve_ids=()):
 def parse_model(raw):
     try:
         if not isinstance(raw,str) or len(raw)>60000:raise ValueError()
-        value=raw.strip()
-        if value.startswith('```json') and value.endswith('```'):value=value[7:-3]
+        value=raw.lstrip('\ufeff').strip()
+        fence=re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```',value,re.I)
+        if fence:value=fence.group(1)
         result=json.loads(value)
         if not isinstance(result,dict):raise ValueError()
         return result
-    except (ValueError,TypeError):raise ValueError('模型未返回有效的结构化数据；未生成计划，请重试或调整需求。') from None
+    except (ValueError,TypeError):raise LearningError('invalid_json') from None
 
 
 def generate(body, call_model, today):

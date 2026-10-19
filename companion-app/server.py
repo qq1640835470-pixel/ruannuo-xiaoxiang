@@ -1,6 +1,8 @@
 """Local-only companion MVP: chat, tasks, typed connectors, encrypted provider access."""
 from __future__ import annotations
 import app_paths
+import model_center
+from learning_diagnostics import LearningError, category as learning_failure
 import base64, binascii
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
 import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks, learning_adjustments, learning_reminders
@@ -201,16 +203,22 @@ def learning_model(content,instruction,max_tokens,*,expected_selection=None):
     else:selected=s['chat_models'][provider]
     if not CHAT_LOCK.acquire(blocking=False):raise ValueError('模型正在处理其他请求，请稍后重试。')
     try:
-        uid=reserve(provider,selected,envelope={'input_token_upper_bound':len((content+instruction).encode('utf-8'))+16000,'max_output_tokens':max_tokens})
+        try:uid=reserve(provider,selected,envelope={'input_token_upper_bound':len((content+instruction).encode('utf-8'))+16000,'max_output_tokens':max_tokens})
+        except ValueError:raise LearningError('auth_quota',reason='budget') from None
         usage=None
         try:
             result=providers.chat(provider,history,{},model=selected,allow_tools=False,instruction=instruction,max_output_tokens=max_tokens)
             usage=result.get('usage');settle(uid,usage)
             return result['text'],{'provider':provider,'requested_model':selected,'returned_model':result.get('model')}
         except Exception as exc:
-            if usage is None:settle(uid,{'requested_model':selected,'error_type':type(exc).__name__})
+            if usage is None:
+                failed_usage=dict(getattr(exc,'usage',None) or {})
+                failed_usage.pop('estimate_cny',None)
+                settle(uid,{**failed_usage,'requested_model':selected,'error_type':type(exc).__name__,'category':learning_failure(exc)})
             runtime_log.error('learning_model_failed',exc,provider=provider)
-            raise ValueError(('学习模型请求失败：'+providers.provider_error_message(exc) if provider=='openrouter' else '学习模型请求失败，未生成计划；')+'未自动重试或切换模型，用量未知时预留保留待核。') from None
+            error=LearningError(learning_failure(exc))
+            error.model={'provider':provider,'requested_model':selected,'returned_model':(getattr(exc,'usage',None) or {}).get('returned_model','unverified')}
+            raise error from None
     finally:CHAT_LOCK.release()
 
 
@@ -497,6 +505,7 @@ def chat(text):
                     with connect() as c:history=[dict(r) for r in c.execute('SELECT role,content FROM (SELECT rowid,role,content FROM messages ORDER BY rowid DESC LIMIT 10) ORDER BY rowid')]
                     r=providers.chat(provider,history,context(),model=None if provider=='local' and local_models.selection()=='auto' else selected);known_usage=r['usage'];settle(uid,known_usage)
                     result=consume_model_result(r,text,source_id,provider,route)
+                    with connect() as c:model_center.record(c,{'provider':provider,'requested_model':selected,'returned_model':r.get('model','unverified')},'success',VERSION,task='chat')
                 except Exception as e:
                     runtime_log.error('model_failed' if known_usage is None else 'chat_processing_failed',e,provider=provider)
                     diagnostic=e.diagnostic if isinstance(e,providers.ProviderHTTPError) else {'provider':provider,'http_status':getattr(e,'code',None),'category':'unclassified_failure'}
@@ -785,6 +794,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         p=urllib.parse.urlsplit(self.path).path
         try:
             if p=='/api/health':return self.send(200,{'app':'study-life-companion','version':VERSION,'build_id':BUILD_ID,'ok':True,'auto_open':True,'companion_renderer':'sprite2d','pet_world':True})
+            if p=='/api/models/center':
+                with connect() as c:result=model_center.catalogue(c,VERSION)
+                return self.send(200,result)
             if p=='/api/learning/reminders':return self.send(200,reminder_call('view'))
             if p=='/api/learning/plans':
                 with connect() as c:result=learning.listing(c)
@@ -920,10 +932,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 operation='submit' if method=='POST' and submit else 'correct' if method=='PATCH' and not submit else 'delete' if method=='DELETE' and not submit else None
                 if not operation:raise ValueError('不支持此测验操作。')
                 return self.send(200,learning_checks.execute(connect,operation,b,learning_model,ident))
+            if method=='POST' and p=='/api/models/center':
+                with LOCK,connect() as c:result=model_center.write(c,b,VERSION)
+                return self.send(200,result)
             if method=='POST' and p=='/api/learning/reminders/check':return self.send(200,reminder_call('check',b))
             if method=='POST' and p=='/api/learning/reminders/action':return self.send(200,reminder_call('action',b))
             if method=='PATCH' and p=='/api/learning/reminders/settings':return self.send(200,reminder_call('settings',b))
-            if method=='POST' and p=='/api/learning/generate':return self.send(200,learning.generate(b,learning_model,now()[:10]))
+            if method=='POST' and p=='/api/learning/generate':
+                result=learning.generate(b,learning_model,now()[:10])
+                if 'plan' in result:
+                    with connect() as c:model_center.record(c,result['model'],'success',VERSION,task='learning_plan')
+                return self.send(200,result)
             if method=='POST' and p=='/api/learning/confirm':return self.send(200,learning_save(b))
             if method=='POST' and p=='/api/chat/attachments':return self.send(200,chat_attachments.store(b,DATA))
             if method=='PATCH' and p=='/api/feedback-target':return self.send(200,feedback_bridge.configure(b,DATA))
@@ -1030,6 +1049,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if b.get('reminders_enabled'):raise ValueError('本版暂未实现系统提醒，不能启用。')
                 with connect() as c:
                     for k,v in updates.items():c.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps(v),k))
+                    selected_provider=updates.get('provider',json.loads(c.execute("SELECT value FROM settings WHERE key='provider'").fetchone()[0]))
+                    if selected_provider=='openrouter':
+                        selected_models=updates.get('chat_models',json.loads(c.execute("SELECT value FROM settings WHERE key='chat_models'").fetchone()[0]))
+                        model_center.recent(c,selected_models.get('openrouter',''))
                 return self.send(200,settings())
             if method=='POST' and p=='/api/balances/refresh':return self.send(200,balances(True))
             if method=='POST' and p.startswith('/api/actions/') and p.endswith('/execute'):
@@ -1040,10 +1063,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='POST' and p=='/api/shutdown':
                 self.send(200,{'ok':True});threading.Thread(target=self.server.shutdown,daemon=True).start();return
             self.send(404,{'error':'这个接口尚未支持'})
+        except LearningError as e:
+            runtime_log.event('learning_failed','warning',category=e.category)
+            self.send(500 if e.category=='database' else 400,{'error':str(e),'category':e.category})
         except ValueError as e:
             runtime_log.error('request_invalid',e);self.send(400,{'error':str(e)})
         except Exception as e:
-            runtime_log.error('request_failed',e);self.send(500,{'error':'本机处理未完成，请稍后重试。没有自动重复提交。'})
+            runtime_log.error('request_failed',e)
+            if isinstance(e,sqlite3.Error) and p.startswith('/api/learning/'):
+                self.send(500,{'error':str(LearningError('database')),'category':'database'})
+            else:self.send(500,{'error':'本机处理未完成，请稍后重试。没有自动重复提交。'})
 
 def run():
     init();server=http.server.ThreadingHTTPServer(('127.0.0.1',PORT),Handler)

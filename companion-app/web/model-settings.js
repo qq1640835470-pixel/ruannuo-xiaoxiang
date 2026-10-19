@@ -36,7 +36,9 @@
     select.disabled = false;
     const rows = catalogue?.models || [];
     if (selected && !rows.some(row => row.id === selected)) select.add(new Option(`${selected}（当前配置，列表未确认）`, selected));
-    rows.forEach(row => select.add(new Option(`${row.label || row.id} · ${row.id} · ${row.protective_estimate_available ? '已有保护估算' : '未核定计费'}`, row.id)));
+    const visible=provider==='openrouter'?rows.slice(0,100):rows;
+    if(selected&&!visible.some(r=>r.id===selected)&&rows.some(r=>r.id===selected))select.add(new Option(`${selected}（当前选择）`,selected));
+    visible.forEach(row => select.add(new Option(`${row.label || row.id} · ${row.id} · ${row.protective_estimate_available ? '已有保护估算' : '未核定计费'}`, row.id)));
     if (selected) select.value = selected;
     else { select.add(new Option('先读取模型列表并选择型号', '')); select.value = ''; }
     if (kind.name === 'chat' && provider === 'openrouter' && $('model-detail')) {
@@ -63,13 +65,17 @@
     const providers = [...new Set(kinds.map(kind => $(kind.provider)?.value).filter(p => p && p !== 'local'))];
     const outcomes = await Promise.allSettled(providers.map(p => getCatalogue(p, refresh)));
     if (current === revision) {
-      kinds.forEach(render); status();
+      kinds.forEach(render); status();window.dispatchEvent(new Event("models-catalogue-updated"));
       const failed = outcomes.some(o => o.status === 'rejected');
       if (failed && $('catalog-status')) $('catalog-status').textContent = '型号列表读取失败，请稍后再试。已有选择保持保存。';
     }
     if (refresh) reading = false; if (button) button.disabled = reading;
   }
   window.XYModels = {
+    selectChatModel(provider,model) {
+      remember(kinds[0]);maps.chat_models[provider]=model;$(kinds[0].provider).value=provider;active.chat=provider;render(kinds[0]);status();
+      if($('settings-save-status'))$('settings-save-status').textContent=`已选 ${provider} / ${model}，请点击保存设置；尚未调用模型。`;
+    },
     settingsLoaded(settings) {
       maps = {chat_models:{...(settings.chat_models || {})}, pet_models:{...(settings.pet_models || {})}};
       kinds.forEach(kind => { active[kind.name] = $(kind.provider)?.value; render(kind); });

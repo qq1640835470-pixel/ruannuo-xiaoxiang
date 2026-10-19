@@ -1,5 +1,6 @@
 """On-demand, loopback-only local inference; no cloud fallback or tool execution."""
 from __future__ import annotations
+from learning_diagnostics import LearningError
 import atexit,base64,json,pathlib,re,secrets,subprocess,threading,time,urllib.request,urllib.error
 import local_runtime_setup as setup
 import local_models,app_paths,local_adaptation,runtime_log,local_persona
@@ -159,6 +160,8 @@ def _chat_once(history,context,companion=False,model=None,tools=None,*,instructi
     _LAST_USED=time.monotonic();_LAST_ROUTE=routing
     choices=result.get('choices') or []
     if not choices:raise ValueError('本地模型未返回有效结果。')
+    if choices[0].get('finish_reason') in ('length','error','content_filter'):
+        raise LearningError('empty_truncated',usage={'provider':'local','requested_model':selected_model,'returned_model':result.get('model','unverified'),'input_tokens':(result.get('usage') or {}).get('prompt_tokens'),'output_tokens':(result.get('usage') or {}).get('completion_tokens')})
     message=choices[0].get('message') or {};text=message.get('content') or '';calls=[]
     names={t.get('function',t).get('name') for t in tools}
     for row in (message.get('tool_calls') or [])[:3]:
@@ -168,7 +171,7 @@ def _chat_once(history,context,companion=False,model=None,tools=None,*,instructi
         if name not in names or not isinstance(args,dict):raise ValueError('本地模型返回未授权工具，未执行。')
         calls.append({'name':name,'args':args})
     if '<tool_call>' in text and not calls:raise ValueError('本地模型未生成可解析的结构化工具调用，未执行。')
-    if not text and not calls:raise ValueError('本地模型返回空回复。')
+    if not text and not calls:raise LearningError('empty_truncated')
     usage=result.get('usage') or {}
     return {'text':text,'calls':calls,'model':selected_model,'usage':{'provider':'local','requested_model':selected_model,'returned_model':result.get('model',selected_model),'local_routing':routing,'input_tokens':usage.get('prompt_tokens'),'output_tokens':usage.get('completion_tokens'),'elapsed_seconds':round(time.monotonic()-started,3),'estimate_cny':0,'price_basis':'local_inference_no_cloud_charge','tools_enabled':bool(tools),**({'purpose':'pet_chat'} if companion else {})}}
 

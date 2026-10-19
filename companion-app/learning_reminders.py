@@ -162,7 +162,8 @@ def write(c,operation,body,now):
                 ident=agent_state.ident(body.get('task_id'));eligible,_=data(c,now)
                 active=current(c,row,now,eligible)
                 if not active or ident not in {t['id'] for t in active['tasks']}:raise ValueError('任务已修改、完成、取消或删除，请刷新计划。')
-                agent_state.mutate(c,'tasks','update',{'status':'active'},ident,source='learning_reminder:'+request_id,begin=False)
+                if eligible[ident]['status']!='active':
+                    agent_state.mutate(c,'tasks','update',{'status':'active'},ident,source='learning_reminder:'+request_id,begin=False)
             elif action=='snooze':
                 if set(body)-{'request_id','action','reminder_id','minutes'} or type(body.get('minutes')) is not int or body['minutes'] not in (15,60):raise ValueError('稍后提醒只支持15或60分钟。')
             elif action!='dismiss' or set(body)-{'request_id','action','reminder_id'}:raise ValueError('提醒操作无效。')
