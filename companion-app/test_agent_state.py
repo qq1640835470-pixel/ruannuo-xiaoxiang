@@ -224,7 +224,7 @@ class AgentStateTests(unittest.TestCase):
             request('/api/goals/' + goal['id'], {}, 'DELETE')
             request('/api/tasks/' + task['id'], {}, 'DELETE')
             self.assertEqual(request('/api/tasks')['tasks'], [])
-            self.assertEqual(request('/api/health')['version'], '0.3.3')
+            self.assertEqual(request('/api/health')['version'], '0.3.4')
             with self.assertRaises(urllib.error.HTTPError) as error:
                 request('/api/goals', {'title': []}, 'POST')
             self.assertEqual(error.exception.code, 400)

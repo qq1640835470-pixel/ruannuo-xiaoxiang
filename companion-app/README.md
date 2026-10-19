@@ -1,6 +1,6 @@
-# 当前版本0.3.3
+# 当前版本0.3.4
 
-先读[本轮交付](feedback-43ca7c7a-progress.md)。以下为历史初版记录，以最新交付为准。
+当前包含Agent状态底座、学习计划、OpenRouter接入、学习成果检验及学习计划动态调整。最新交付与未验收事项见[动态调整交接](learning-adjustments-progress.md)和[项目交接](HANDOFF.md)。以下为历史初版记录。
 
 ---
 # 软糯小祥 · 学习生活助手 0.1

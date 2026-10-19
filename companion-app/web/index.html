@@ -14,6 +14,7 @@
   <script src="/app.js" defer></script>
   <script src="/learning.js" defer></script>
   <script src="/learning-checks.js" defer></script>
+  <script src="/learning-adjustments.js" defer></script>
   <link rel="stylesheet" href="/learning.css">
   <script src="/chat-attachments.js" defer></script>
   <script src="/feedback-target.js" defer></script>
@@ -81,6 +82,12 @@
             <button class="primary-button" type="submit">发送所选范围，生成测验（可能计费）</button>
           </form><div id="check-current"></div>
           <div class="learning-heading"><h3>历史检验记录</h3><button id="check-refresh" type="button" class="subtle-button">刷新检验历史</button></div><div id="check-history"></div>
+        </section>
+        <section id="learning-adjustments" aria-label="学习计划动态调整" hidden>
+          <h3>学习计划动态调整</h3><p>先选依据并预览，再生成有限调整建议；确认保存前，正式计划不变。完成任务不等于掌握。</p>
+          <p id="adjustment-status" role="status"></p><div id="adjustment-pending"></div>
+          <div id="adjustment-selection"></div><div id="adjustment-preview"></div><div id="adjustment-draft"></div>
+          <h4>已确认的调整记录</h4><div id="adjustment-history"></div>
         </section>
       </section>
       <section id="plan-page" class="page plan-page" aria-label="计划日程" hidden>

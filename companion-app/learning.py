@@ -36,7 +36,7 @@ def requirements(body):
     return result
 
 
-def plan(body):
+def plan(body, *, allow_rest_days=False):
     if not isinstance(body, dict) or set(body) != {'requirements', 'title', 'outcome', 'tasks'}:
         raise ValueError('计划结构无效。')
     req = requirements(body['requirements'])
@@ -62,7 +62,7 @@ def plan(body):
             ids.add(ident);item['id'] = ident
         tasks.append(item)
     expected={(date(req['start_date'])+dt.timedelta(days=i)).isoformat() for i in range((date(req['deadline'])-date(req['start_date'])).days+1)}
-    if set(days)!=expected:raise ValueError('请为计划中的每一天安排学习、复习或练习。')
+    if not allow_rest_days and set(days)!=expected:raise ValueError('请为计划中的每一天安排学习、复习或练习。')
     if not {'review','practice'} <= kinds:raise ValueError('计划须包含复习和练习安排。')
     return {'requirements':req, 'title':text(body['title'],200), 'outcome':text(body['outcome']), 'tasks':tasks}
 
@@ -78,7 +78,7 @@ def revision(goal, tasks):
     return hashlib.sha256(json.dumps([goal,tasks],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
 
-def load(c, goal_id):
+def load(c, goal_id, *, include_progress=True):
     goal = agent_state.read(c, 'goals', goal_id)
     meta = decode(goal['details'])
     if not meta:raise ValueError('该目标不是学习计划。')
@@ -87,7 +87,7 @@ def load(c, goal_id):
     for task in tasks:
         item = decode(task['details'])
         if not item:continue
-        progress = agent_state.read(c,'task_progress',parent=task['id'])
+        progress = agent_state.read(c,'task_progress',parent=task['id']) if include_progress else []
         rows.append({**task, 'learning':item, 'progress':progress,
                      'actual_minutes':sum(p['minutes'] or 0 for p in progress)})
     return {'goal':goal, 'requirements':meta['requirements'], 'outcome':meta['outcome'],
@@ -98,12 +98,12 @@ def listing(c):
     return [load(c,row['id']) for row in agent_state.read(c,'goals') if decode(row['details'])]
 
 
-def save(c, body):
+def save(c, body, *, begin=True, preserve_ids=()):
     if not isinstance(body,dict) or set(body)-{'request_id','plan','goal_id','revision'}:raise ValueError('保存参数无效。')
     request_id = agent_state.ident(body.get('request_id'))
-    draft = plan(body.get('plan'))
+    draft = plan(body.get('plan'),allow_rest_days=bool(body.get('goal_id')))
     fingerprint = hashlib.sha256(json.dumps(['learning_save',body],sort_keys=True,ensure_ascii=False,allow_nan=False).encode()).hexdigest()
-    c.execute('BEGIN IMMEDIATE')
+    if begin:c.execute('BEGIN IMMEDIATE')
     receipt = c.execute('SELECT * FROM agent_state_requests WHERE id=?',(request_id,)).fetchone()
     if receipt:
         if receipt['fingerprint'] != fingerprint:raise ValueError('请求ID已用于其他内容。')
@@ -111,7 +111,7 @@ def save(c, body):
     goal_id = body.get('goal_id')
     existing = {}
     if goal_id:
-        current = load(c,agent_state.ident(goal_id))
+        current = load(c,agent_state.ident(goal_id),include_progress=False)
         if body.get('revision') != current['revision']:raise ValueError('计划已被修改，请刷新后重新编辑。')
         existing = {t['id']:t for t in current['tasks']}
     elif any('id' in t for t in draft['tasks']):raise ValueError('新计划不能引用已有任务。')
@@ -125,10 +125,11 @@ def save(c, body):
         if ident and ident not in existing:raise ValueError('任务不属于当前学习计划。')
         fields = {'title':task['title'],'goal_id':goal['id'],'scheduled_at':task['date'],
                   'details':json.dumps({'type':MARKER,**{k:task[k] for k in ('content','minutes','outcome','kind')}},ensure_ascii=False)}
-        agent_state.mutate(c,'tasks','update' if ident else 'create',fields,ident,source=source,begin=False)
+        if ident not in preserve_ids:
+            agent_state.mutate(c,'tasks','update' if ident else 'create',fields,ident,source=source,begin=False)
         if ident:kept.add(ident)
     for ident in existing.keys()-kept:
-        agent_state.mutate(c,'tasks','update',{'status':'cancelled'},ident,source=source,begin=False)
+        if existing[ident]['status']!='cancelled':agent_state.mutate(c,'tasks','update',{'status':'cancelled'},ident,source=source,begin=False)
     result = {'ok':True,'goal_id':goal['id'],'request_id':request_id}
     c.execute('INSERT INTO agent_state_requests VALUES(?,?,?,?,?,?)',(request_id,fingerprint,json.dumps(result),'goals',goal['id'],agent_state.now()))
     return result

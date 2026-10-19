@@ -3,7 +3,7 @@ from __future__ import annotations
 import app_paths
 import base64, binascii
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
-import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks
+import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks, learning_adjustments
 import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes, local_models, local_adaptation
 import connectors, providers, feedback_bridge, runtime_log, local_features, web_tools, music_service, companion_knowledge, persistent_memory, model_routing, typed_tools
 
@@ -11,7 +11,7 @@ ROOT=pathlib.Path(__file__).resolve().parent
 DATA=app_paths.DATA
 DB=DATA/'assistant.sqlite3'
 PORT=18764
-VERSION='0.3.3'
+VERSION='0.3.4'
 BUILD_ID=hashlib.sha256(b''.join(p.read_bytes() for p in sorted([*ROOT.glob('*.py'),*ROOT.joinpath('web').glob('*.js'),*ROOT.joinpath('web').glob('*.css'),ROOT/'web'/'index.html']))).hexdigest()[:12]
 LOCK=threading.RLock()
 CHAT_LOCK=threading.Lock()
@@ -56,6 +56,7 @@ def init():
         for k,v in DEFAULT_SETTINGS.items():c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,json.dumps(v,ensure_ascii=False)))
         agent_state.init(c)
         learning_checks.init(c)
+        learning_adjustments.init(c)
         persistent_memory.init(c)
         chat_history.init(c)
         if not c.execute("SELECT 1 FROM settings WHERE key='memory_backfill_v2'").fetchone():
@@ -173,8 +174,15 @@ def state_write(table,action,body,record_id=None,parent=None,source='local_api')
     runtime_log.event('agent_state_written',kind=table,status=action)
     return result
 
-def learning_model(content,instruction,max_tokens):
+def learning_selection(s=None):
+    s=settings() if s is None else s
+    return {'provider':s['provider'],'model':local_models.selection() if s['provider']=='local' else s['chat_models'][s['provider']]}
+
+
+def learning_model(content,instruction,max_tokens,*,expected_selection=None):
     s=settings();provider=s['provider']
+    if expected_selection is not None and learning_selection(s)!=expected_selection:
+        raise ValueError('模型选择已变化，请重新预览并确认。')
     if provider!='local' and not s['api_generation_enabled']:
         raise ValueError('云模型生成已关闭，请在设置中启用或选择本机模型。')
     history=[{'role':'user','content':content}]
@@ -758,7 +766,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return True
     def body(self):
         size=int(self.headers.get('Content-Length','0'))
-        if size<0 or size>({'/api/learning/confirm':500000,'/api/feedback-local':1000000,'/api/local/analyze-image':12000000,'/api/chat/attachments':6000000}.get(urllib.parse.urlsplit(self.path).path,40000)):raise ValueError('请求过长')
+        if size<0 or size>({'/api/learning/confirm':500000,'/api/learning/adjustments/confirm':180000,'/api/feedback-local':1000000,'/api/local/analyze-image':12000000,'/api/chat/attachments':6000000}.get(urllib.parse.urlsplit(self.path).path,40000)):raise ValueError('请求过长')
         b=json.loads(self.rfile.read(size) or b'{}')
         if not isinstance(b,dict):raise ValueError('请求必须是对象')
         return b
@@ -774,6 +782,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p=='/api/learning/checks':
                 with connect() as c:result=learning_checks.listing(c)
                 return self.send(200,{'checks':result})
+            if p in ('/api/learning/adjustments/options','/api/learning/adjustments'):
+                goal_id=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('goal_id',[''])[0]
+                with connect() as c:result=learning_adjustments.options(c,goal_id) if p.endswith('/options') else {'adjustments':learning_adjustments.confirmed(c,goal_id)}
+                return self.send(200,result)
+            match=re.fullmatch(r'/api/learning/adjustments/([A-Za-z0-9_-]{1,64})',p)
+            if match:
+                with connect() as c:result=learning_adjustments.get(c,match[1])
+                return self.send(200,result)
             match=re.fullmatch(r'/api/learning/checks/([A-Za-z0-9_-]{1,64})',p)
             if match:
                 with connect() as c:result=learning_checks.get(c,match[1])
@@ -869,6 +885,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.permitted(True):return self.send(403,{'error':'请求来源或本机会话无效，请重新打开助手。'})
         try:
             b=self.body();p=urllib.parse.urlsplit(self.path).path
+            if method=='POST' and p=='/api/learning/adjustments/preview':
+                if not isinstance(b,dict) or set(b)!={'selection'}:raise ValueError('预览参数无效。')
+                selected=learning_selection()
+                with connect() as c:result=learning_adjustments.preview(c,b['selection'],now()[:10],selected)
+                return self.send(200,result)
+            if method=='POST' and p=='/api/learning/adjustments/generate':
+                selected=learning_selection()
+                call=lambda content,instruction,tokens:learning_model(content,instruction,tokens,expected_selection=selected)
+                return self.send(200,learning_adjustments.generate(connect,b,now()[:10],selected,call))
+            if method=='POST' and p=='/api/learning/adjustments/confirm':
+                with LOCK,connect() as c:result=learning_adjustments.confirm(c,b)
+                return self.send(200,result)
+            match=re.fullmatch(r'/api/learning/adjustments/([A-Za-z0-9_-]{1,64})/cancel',p)
+            if method=='POST' and match:
+                if b!={}:raise ValueError('取消调整不接受其他内容。')
+                with connect() as c:result=learning_adjustments.cancel(c,match[1])
+                return self.send(200,result)
             if method=='POST' and p=='/api/learning/checks':
                 return self.send(200,learning_checks.execute(connect,'generate',b,learning_model))
             match=re.fullmatch(r'/api/learning/checks/([A-Za-z0-9_-]{1,64})(?:/(submit))?',p)

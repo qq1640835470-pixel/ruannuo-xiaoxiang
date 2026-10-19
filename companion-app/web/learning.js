@@ -119,6 +119,7 @@
         if(draft)throw new Error('请先保存或取消当前草稿。');
         draft={goal_id:saved.goal.id,revision:saved.revision,request_id:newRequest(),plan:{title:saved.goal.title,requirements:saved.requirements,outcome:saved.outcome,tasks:live.map(t=>({id:t.id,title:t.title,date:t.scheduled_at.slice(0,10),...Object.fromEntries(['content','minutes','outcome','kind'].map(k=>[k,t.learning[k]]))}))}};persist();editor();$('#learning-draft').scrollIntoView({block:'start'});
       });
+      button(box,'调整学习计划',async()=>{await window.LearningAdjustments?.open(saved.goal.id);});
       for(const [label,filter] of [['今日与逾期任务',t=>t.scheduled_at.slice(0,10)<=today&&!['done','cancelled'].includes(t.status)],['后续任务',t=>t.scheduled_at.slice(0,10)>today&&!['done','cancelled'].includes(t.status)],['已完成与取消',t=>['done','cancelled'].includes(t.status)]]){
         const group=node('details');group.open=label!=='已完成与取消';group.append(node('summary',label));
         const tasks=saved.tasks.filter(filter).sort((a,b)=>a.scheduled_at.localeCompare(b.scheduled_at));
