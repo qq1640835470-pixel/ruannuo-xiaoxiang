@@ -113,6 +113,13 @@ class OpenRouterTests(unittest.TestCase):
         self.assertEqual(result['usage']['provider_reported_cost_usd'],0.00004)
         self.assertFalse(result['usage']['billing_amount_confirmed']);self.assertNotIn(KEY,(self.root/'logs/runtime.jsonl').read_text())
 
+    def test_structured_learning_evidence_is_not_clipped_like_chat_history(self):
+        payload=json.dumps({'plan':{'content':'节点法练习'*700},'progress':[{'note':'所选记录末尾'}],'checks':[{'id':'selected-check'}]},ensure_ascii=False)
+        with patch('providers.hub.load_keys',return_value={'openrouter':KEY}),patch('providers.post',return_value=REPLY) as post:
+            providers.chat('openrouter',[{'role':'user','content':payload}],{},model=MODEL,allow_tools=False,instruction='只输出JSON',max_output_tokens=8192)
+        sent=post.call_args.args[2]['messages'][-1]['content']
+        self.assertEqual(len(sent),len(payload));self.assertEqual(json.loads(sent),json.loads(payload))
+
     def test_json_capability_and_limits(self):
         _,body=self.chat(instruction='Return JSON',max_output_tokens=8192,allow_tools=False)
         self.assertEqual(body['response_format'],{'type':'json_object'})

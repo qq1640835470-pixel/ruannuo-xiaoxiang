@@ -54,6 +54,14 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(len(assets),1);self.assertIn('cpu',assets[0]['name'])
 
 class AdapterTests(unittest.TestCase):
+    def test_learning_structured_input_preserves_selected_evidence_tail(self):
+        payload=json.dumps({'plan':'节点法'*1200,'selected_progress':'所选记录末尾'},ensure_ascii=False)
+        routing={'model':local_runtime.local_models.SMALL,'reason':'fixture','selection':'manual'}
+        reply={'choices':[{'message':{'content':'{}'}}],'usage':{'prompt_tokens':12,'completion_tokens':2}}
+        with patch('local_runtime.choose',return_value=routing),patch('local_runtime.ensure_ready'),patch('local_runtime._request',return_value=reply) as call:
+            local_runtime._chat_once([{'role':'user','content':payload}],{},model=routing['model'],instruction='只输出JSON',max_output_tokens=4096)
+        self.assertEqual(json.loads(call.call_args.args[1]['messages'][-1]['content']),json.loads(payload))
+
     def test_no_install_reports_honestly(self):
         with tempfile.TemporaryDirectory() as d,patch.object(setup,'BASE',pathlib.Path(d)):
             self.assertFalse(local_runtime.status()['installed']);self.assertFalse(local_runtime.status()['ready'])

@@ -119,10 +119,12 @@ def _chat_once(history,context,companion=False,model=None,tools=None,*,instructi
     import persistent_memory
     tools=[] if companion or not local_models.capabilities(selected_model)['tools'] else (tools or [])
     messages=[];remaining=3200 if selected_model==local_models.GEMMA else 6000
-    for message in reversed(history[-10:]):
+    for message in reversed(history if instruction is not None else history[-10:]):
         if message.get('role') not in ('user','assistant'):continue
-        content=persistent_memory.redact(str(message.get('content','')))[:3000]
-        if len(content)>remaining:break
+        content=persistent_memory.redact(str(message.get('content','')))
+        if instruction is None:
+            content=content[:3000]
+            if len(content)>remaining:break
         messages.insert(0,{'role':message['role'],'content':content});remaining-=len(content)
     raw_context=persistent_memory.redact(context if isinstance(context,str) else json.dumps(context,ensure_ascii=False))
     try:

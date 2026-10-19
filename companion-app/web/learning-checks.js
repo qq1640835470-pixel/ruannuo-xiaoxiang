@@ -36,7 +36,7 @@
     pending=null;persist();pendingView();
     if(result.deleted){active=null;answers={};render();persist();}
     else {active=await api(`/api/learning/checks/${result.id}`);answers=active.answers||{};render();persist();}
-    status(result.deleted?'测验已删除。':'结果已保存到本机；测验表现不代表真正掌握程度。');await refresh();
+    status(result.deleted?'测验已删除。':active.status==='generated'?'测验题目已生成并保存，尚未提交答案。':'结果已保存到本机；测验表现不代表真正掌握程度。');await refresh();
   }
   async function write(path,method,body){
     if(pending)throw new Error('请先核对或结束待处理请求。');

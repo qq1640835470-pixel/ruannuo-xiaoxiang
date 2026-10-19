@@ -2,6 +2,8 @@
 
 当前包含Agent状态底座、学习计划、OpenRouter接入、学习成果检验及学习计划动态调整。最新交付与未验收事项见[动态调整交接](learning-adjustments-progress.md)和[项目交接](HANDOFF.md)。以下为历史初版记录。
 
+0.3.4集成验收、数据库副本演练与真实OpenRouter最小测试步骤见[验收记录](learning-system-034-acceptance.md)。本机现有`.runtime`依赖为CPython 3.12，使用3.10启动WebView2会遇到cffi ABI版本不匹配；隔离宿主已在现有3.12.14下验证，不需要修改系统默认Python。
+
 ---
 # 软糯小祥 · 学习生活助手 0.1
 

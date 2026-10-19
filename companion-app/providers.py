@@ -272,9 +272,11 @@ def chat(provider,history,context,*,companion=False,model=None,allow_tools=True,
     tools_enabled=allow_tools and not companion and model in TOOL_MODELS.get(provider,set())
     # A small fixed context prevents growth in cost and exposure. Tools carry no raw files.
     hist=[];budget=12000
-    for m in reversed(history[-10:]):
-        content=persistent_memory.redact(m['content'])[:3000]
-        if len(content)>budget:break
+    for m in reversed(history if instruction is not None else history[-10:]):
+        content=persistent_memory.redact(m['content'])
+        if instruction is None:
+            content=content[:3000]
+            if len(content)>budget:break
         hist.insert(0,{'role':m['role'],'content':content});budget-=len(content)
     if instruction is not None:prompt=instruction
     else:
