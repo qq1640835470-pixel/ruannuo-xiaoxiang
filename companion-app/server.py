@@ -3,7 +3,7 @@ from __future__ import annotations
 import app_paths
 import base64, binascii
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
-import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks, learning_adjustments
+import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks, learning_adjustments, learning_reminders
 import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes, local_models, local_adaptation
 import connectors, providers, feedback_bridge, runtime_log, local_features, web_tools, music_service, companion_knowledge, persistent_memory, model_routing, typed_tools
 
@@ -57,6 +57,7 @@ def init():
         agent_state.init(c)
         learning_checks.init(c)
         learning_adjustments.init(c)
+        learning_reminders.init(c)
         persistent_memory.init(c)
         chat_history.init(c)
         if not c.execute("SELECT 1 FROM settings WHERE key='memory_backfill_v2'").fetchone():
@@ -173,6 +174,14 @@ def state_write(table,action,body,record_id=None,parent=None,source='local_api')
         result=agent_state.mutate(c,table,action,body,record_id,parent,source)
     runtime_log.event('agent_state_written',kind=table,status=action)
     return result
+
+def reminder_call(operation,body=None):
+    with LOCK,connect() as c:
+        stamp=learning_reminders.local_now()
+        if operation=='view':return learning_reminders.view(c,stamp)
+        if operation=='check':return learning_reminders.check(c,body,stamp)
+        return learning_reminders.write(c,operation,body,stamp)
+
 
 def learning_selection(s=None):
     s=settings() if s is None else s
@@ -776,6 +785,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         p=urllib.parse.urlsplit(self.path).path
         try:
             if p=='/api/health':return self.send(200,{'app':'study-life-companion','version':VERSION,'build_id':BUILD_ID,'ok':True,'auto_open':True,'companion_renderer':'sprite2d','pet_world':True})
+            if p=='/api/learning/reminders':return self.send(200,reminder_call('view'))
             if p=='/api/learning/plans':
                 with connect() as c:result=learning.listing(c)
                 return self.send(200,{'plans':result})
@@ -910,6 +920,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 operation='submit' if method=='POST' and submit else 'correct' if method=='PATCH' and not submit else 'delete' if method=='DELETE' and not submit else None
                 if not operation:raise ValueError('不支持此测验操作。')
                 return self.send(200,learning_checks.execute(connect,operation,b,learning_model,ident))
+            if method=='POST' and p=='/api/learning/reminders/check':return self.send(200,reminder_call('check',b))
+            if method=='POST' and p=='/api/learning/reminders/action':return self.send(200,reminder_call('action',b))
+            if method=='PATCH' and p=='/api/learning/reminders/settings':return self.send(200,reminder_call('settings',b))
             if method=='POST' and p=='/api/learning/generate':return self.send(200,learning.generate(b,learning_model,now()[:10]))
             if method=='POST' and p=='/api/learning/confirm':return self.send(200,learning_save(b))
             if method=='POST' and p=='/api/chat/attachments':return self.send(200,chat_attachments.store(b,DATA))

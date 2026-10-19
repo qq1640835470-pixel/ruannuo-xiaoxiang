@@ -1,0 +1,4 @@
+.learning-reminder{margin:0 1rem .5rem;padding:12px 16px;border:1px solid #cbdced;border-radius:14px;background:#f1f7fd;color:#36536f;max-height:35vh;overflow:auto;font-size:.9rem;flex-shrink:0}
+.learning-reminder[hidden]{display:none}.learning-reminder p{margin:5px 0}.learning-reminder ul{padding-left:20px;margin:6px 0}.learning-reminder li{margin:5px 0;overflow-wrap:anywhere}.learning-reminder button{margin:4px;font-size:.85rem}.reminder-actions{display:flex;flex-wrap:wrap;gap:4px}
+#learning-review{padding:10px 14px;border:1px solid #d4e1ed;border-radius:14px;background:#f6f9fc}#learning-review p{margin:.5rem 0}#learning-reminder-settings{margin:12px 0}#learning-reminder-settings summary{cursor:pointer}#reminder-status{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:650px){.learning-reminder{margin:0 .5rem .5rem;padding:8px;max-height:30vh}}

@@ -6,7 +6,7 @@
   const labels={course:'课程',scope:'学习范围（具体章节或主题）',start_date:'开始日期',deadline:'截止日期',daily_minutes:'每天可用分钟',level:'当前基础（不清楚可填“尚不清楚”）'};
   const kinds={study:'学习',review:'复习',practice:'练习'};
   const statuses={pending:'待开始',active:'进行中',paused:'暂停',deferred:'已延期',done:'完成',cancelled:'取消'};
-  let draft=null, busy=false, pendingRecord=null;
+  let draft=null, busy=false, pendingRecord=null, focusTaskId=null;
   function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
   function message(text){$('#learning-status').textContent=text;}
   function persist(){
@@ -109,7 +109,7 @@
     if(!response.plans.length)area.append(node('p','还没有已保存的学习计划。'));
     const today=new Date().toLocaleDateString('sv-SE');
     for(const saved of response.plans){
-      const box=node('article',undefined,'learning-plan');
+      const box=node('article',undefined,'learning-plan');box.dataset.goalId=saved.goal.id;
       box.append(node('h3',`${saved.goal.title} · ${statuses[saved.goal.status]||saved.goal.status}`));
       box.append(node('p',`${saved.requirements.course} · ${saved.requirements.scope} · 截止 ${saved.goal.deadline}`));
       box.append(node('p',`预期成果：${saved.outcome}`));
@@ -125,7 +125,7 @@
         const tasks=saved.tasks.filter(filter).sort((a,b)=>a.scheduled_at.localeCompare(b.scheduled_at));
         if(!tasks.length)group.append(node('p','暂无任务','muted-text'));
         for(const task of tasks){
-          const card=node('article',undefined,'learning-task');
+          const card=node('article',undefined,'learning-task');card.dataset.taskId=task.id;
           card.append(node('h4',task.title),node('p',`${task.scheduled_at.slice(0,10)} · ${statuses[task.status]} · ${kinds[task.learning.kind]} · 建议 ${task.learning.minutes} / 实际 ${task.actual_minutes} 分钟`),node('p',task.learning.content),node('p',`预期成果：${task.learning.outcome}`));
           const actions=node('div',undefined,'learning-actions');
           for(const [status,label] of [['active','开始'],['done','完成'],['paused','暂停'],['cancelled','取消任务']])button(actions,label,async()=>{await api(`/api/tasks/${task.id}`,{method:'PATCH',body:JSON.stringify({status,request_id:newRequest()})});message('任务状态已保存；掌握程度未作推断。');await refresh();});
@@ -137,6 +137,8 @@
         }box.append(group);
       }area.append(box);
     }
+    if(focusTaskId){const target=root.querySelector(`[data-task-id="${CSS.escape(focusTaskId)}"]`);focusTaskId=null;if(target){const group=target.closest('details');if(group)group.open=true;target.tabIndex=-1;target.focus();target.scrollIntoView({block:'center'});}}
+    window.dispatchEvent(new Event('learning-state-refreshed'));
   }
   $('#learning-input').onsubmit=e=>{e.preventDefault();run(async()=>{
     if(draft)throw new Error('请先保存或取消当前草稿。');
@@ -148,6 +150,7 @@
     message('正在生成计划草稿…');const r=await api('/api/learning/generate',{method:'POST',body:JSON.stringify({stage:'plan',requirements:readRequirements()})});
     draft={plan:r.plan,model:r.model,request_id:newRequest()};persist();editor();message('草稿已生成，请编辑并确认保存。');
   });};
+  window.addEventListener('learning-task-focus',event=>{focusTaskId=event.detail.task_id;run(refresh);});
   $('#learning-refresh').onclick=()=>run(refresh);
   $('#learning-request').addEventListener('input',persist);
   requirementsFields();

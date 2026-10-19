@@ -1,4 +1,5 @@
 """Local synthetic attachment fixtures; no user files, model calls or external network."""
+import contextlib
 import base64,http.cookiejar,http.server,io,json,pathlib,sqlite3,tempfile,threading,unittest,urllib.error,urllib.request,zipfile
 from unittest.mock import patch
 from PIL import Image
@@ -115,7 +116,7 @@ class AttachmentChatTests(unittest.TestCase):
 
     def test_old_database_migration_preserves_existing_message(self):
         path=server.DATA/'old.sqlite3'
-        with sqlite3.connect(path) as c:
+        with contextlib.closing(sqlite3.connect(path)) as c, c:
             c.execute('CREATE TABLE messages(id TEXT PRIMARY KEY,role TEXT,content TEXT,created_at TEXT)')
             c.execute("INSERT INTO messages VALUES('old','assistant','existing','2026-10-18')")
         with patch.object(server,'DB',path):

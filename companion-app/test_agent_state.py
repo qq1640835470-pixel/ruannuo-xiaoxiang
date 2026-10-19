@@ -64,7 +64,7 @@ class AgentStateTests(unittest.TestCase):
 
     def test_legacy_migration_idempotent_and_old_task_edit(self):
         legacy = server.DATA / 'legacy.sqlite3'
-        with sqlite3.connect(legacy) as c:
+        with contextlib.closing(sqlite3.connect(legacy)) as c, c:
             c.row_factory = sqlite3.Row
             c.execute('CREATE TABLE tasks(id TEXT PRIMARY KEY,title TEXT,details TEXT,scheduled_at TEXT,status TEXT,created_at TEXT)')
             c.execute("INSERT INTO tasks VALUES('old','旧任务','原备注','','paused','2026-01-01')")

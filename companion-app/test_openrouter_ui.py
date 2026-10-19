@@ -10,7 +10,7 @@ import providers
 from test_openrouter import ROW, Response
 
 if __name__=='__main__':
-    with tempfile.TemporaryDirectory() as folder,patch.object(server,'DATA',pathlib.Path(folder)),patch.object(server,'DB',pathlib.Path(folder)/'test.db'),patch.object(providers,'CATALOG_PATH',pathlib.Path(folder)/'catalogue.json'),patch('providers.urllib.request.build_opener') as build:
+    with tempfile.TemporaryDirectory() as folder,patch.object(server,'DATA',pathlib.Path(folder)),patch.object(server,'DB',pathlib.Path(folder)/'test.db'),patch.object(providers,'CATALOG_PATH',pathlib.Path(folder)/'catalogue.json'),patch('providers.hub.load_keys',return_value={}),patch('providers.urllib.request.build_opener') as build:
         build.return_value.open.return_value=Response({'data':[ROW]})
         server.init()
         srv=http.server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)

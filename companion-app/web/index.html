@@ -15,6 +15,8 @@
   <script src="/learning.js" defer></script>
   <script src="/learning-checks.js" defer></script>
   <script src="/learning-adjustments.js" defer></script>
+  <script src="/learning-reminders.js" defer></script>
+  <link rel="stylesheet" href="/learning-reminders.css">
   <link rel="stylesheet" href="/learning.css">
   <script src="/chat-attachments.js" defer></script>
   <script src="/feedback-target.js" defer></script>
@@ -59,6 +61,7 @@
     <main>
       <header class="topbar"><div><span class="eyebrow" id="today-label"></span><h1 id="page-title" class="sr-only">对话</h1></div><div class="header-tools"><button id="workspace-open" class="workspace-button" aria-label="打开浏览器与音乐">♫ 工具</button><div class="clock-panel"><time id="live-clock" aria-label="当前本机时间"></time><span id="time-period"></span></div></div></header>
       <div id="global-error" class="error-banner" role="alert" hidden></div>
+      <aside id="learning-reminder" class="learning-reminder" aria-label="学习提醒" hidden></aside>
       <section id="chat-page" class="page chat-page" aria-label="对话">
         <div class="conversation" id="conversation" aria-live="polite">
           <div class="welcome" id="welcome"><h2>今天想聊什么？</h2><div class="suggestions"><button data-prompt="打开高德地图去深圳大学">↗ <span>打开高德地图去深圳大学</span></button><button data-prompt="记下明天买电池">＋ <span>记下明天买电池</span></button><button data-prompt="打开微信">◌ <span>打开微信</span></button><button data-prompt="查询API余额">◎ <span>查询 API 余额</span></button></div></div>
@@ -66,7 +69,14 @@
         <form id="chat-form" class="composer"><label class="sr-only" for="chat-input">告诉我想做的事</label><textarea id="chat-input" rows="2" placeholder="说说你想做的事…" maxlength="3000"></textarea><div class="composer-footer"><span>Enter 发送 · Shift + Enter 换行</span><button type="submit" id="send-button" class="send-button" aria-label="发送消息">↑</button></div></form>
       </section>
       <section id="learning-page" class="page learning-page" aria-label="学习" hidden>
-        <h2>学习计划</h2><p class="muted-text">先核对需求，再生成草稿；确认后才保存。完成任务不等于已经掌握。</p>
+        <h2>学习计划</h2>
+        <section id="learning-review" aria-label="今日学习回顾"></section>
+        <details id="learning-reminder-settings"><summary>应用内学习提醒（默认关闭）</summary><p>只在软件运行且页面可见时检查，不调用模型。关闭软件后不继续提醒；多任务合并展示。</p><p id="reminder-pause-indicator"></p><form id="reminder-settings-form">
+          <label class="check-option"><input id="reminder-enabled" type="checkbox">启用应用内学习提醒</label>
+          <div class="learning-grid"><label>提醒时段开始<input id="reminder-window-start" type="time" required></label><label>提醒时段结束<input id="reminder-window-end" type="time" required></label><label>勿扰开始<input id="reminder-quiet-start" type="time" required></label><label>勿扰结束<input id="reminder-quiet-end" type="time" required></label><label>每日主动提醒上限（含稍后提醒）<input id="reminder-limit" type="number" min="1" max="8" required></label></div>
+          <button type="submit" class="subtle-button">保存提醒设置</button><button type="button" id="reminder-pause" class="subtle-button">今日暂停提醒</button><button type="button" id="reminder-resume" class="subtle-button">恢复今日提醒</button>
+        </form><p>同一任务每天最多主动出现一次；主动提醒间隔至少30分钟，主动选择稍后可在15或60分钟后再提醒，每天默认最多4次。关闭、跳过和稍后均不修改任务事实。</p></details>
+        <p id="reminder-status" role="status"></p><p class="muted-text">先核对需求，再生成草稿；确认后才保存。完成任务不等于已经掌握。</p>
         <p class="muted-text">点击分析或生成时，仅本页填写的需求发送给设置中所选模型；云模型可能计费。已有学习记录和备注不会自动发送。</p>
         <p id="learning-status" role="status"></p>
         <form id="learning-input"><label>想学什么<textarea id="learning-request" rows="3" maxlength="2500" placeholder="我想在7天内复习完电路分析，每天约2小时。"></textarea></label><button class="subtle-button" type="submit">分析学习需求</button></form>
