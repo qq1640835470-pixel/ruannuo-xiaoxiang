@@ -23,7 +23,7 @@ const base=process.argv[2];if(!base?.startsWith('http://127.0.0.1:'))throw new E
   let card=page.locator('.learning-task').filter({has:page.locator('h4',{hasText:'复习节点法'})}).first();
   await card.locator('.learning-progress input').fill('25');await card.locator('.learning-progress textarea').fill('节点电压定义练习。'.repeat(180)+'SELECTED_END');await card.getByRole('button',{name:'记录本次学习',exact:true}).click();await page.locator('#learning-status').filter({hasText:'学习记录已保存'}).waitFor();
   await page.request.post(base+`/api/tasks/${review.id}/progress`,{data:{request_id:'ui-unselected-note',minutes:9,note:'UNSELECTED_NOTE'}});
-  await card.getByRole('button',{name:'完成',exact:true}).click();await page.locator('#learning-status').filter({hasText:'任务状态已保存'}).waitFor();
+  await card.getByRole('button',{name:'完成',exact:true}).click();await page.locator('#learning-task-feedback').filter({hasText:'任务已完成'}).waitFor();
   if(!await page.locator('.learning-plan > details').nth(2).evaluate(node=>node.open))await page.locator('.learning-plan > details').nth(2).locator('summary').first().click();
   card=page.locator('.learning-task').filter({has:page.locator('h4',{hasText:'复习节点法'})}).first();await card.getByRole('button',{name:'检验学习成果',exact:true}).click();await page.locator('#check-generate button').click();await page.locator('#check-current fieldset').first().waitFor();
   await page.locator('#check-status').filter({hasText:'尚未提交答案'}).waitFor();

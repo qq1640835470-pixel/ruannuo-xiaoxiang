@@ -164,9 +164,13 @@ def mutate(c, table, action, body, record_id=None, parent=None, source='local_ap
             keys = list(row)
             c.execute('INSERT INTO ' + table + '(' + ','.join(keys) + ') VALUES(' + ','.join('?' for _ in keys) + ')', list(row.values()))
         else:
-            get(c, table, record_id)
-            values.update(updated_at=stamp, updated_source_id=source_id)
-            c.execute('UPDATE ' + table + ' SET ' + ','.join(k + '=?' for k in values) + ' WHERE id=?', [*values.values(), record_id])
+            current = get(c, table, record_id)
+            if (table == 'tasks' and current['status'] in ('done', 'cancelled')
+                    and 'status' in values and values['status'] not in ('done', 'cancelled')):
+                raise ValueError('已完成或已取消的任务不能重新开始、暂停或延期。')
+            if table != 'tasks' or values != {'status': current['status']}:
+                values.update(updated_at=stamp, updated_source_id=source_id)
+                c.execute('UPDATE ' + table + ' SET ' + ','.join(k + '=?' for k in values) + ' WHERE id=?', [*values.values(), record_id])
         result = get(c, table, record_id)
     if request_id:
         c.execute('INSERT INTO agent_state_requests VALUES(?,?,?,?,?,?)', (request_id, fingerprint, json.dumps(result, ensure_ascii=False), table, record_id, stamp))

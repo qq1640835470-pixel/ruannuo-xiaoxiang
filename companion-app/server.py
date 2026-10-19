@@ -1070,7 +1070,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             runtime_log.error('request_invalid',e);self.send(400,{'error':str(e)})
         except Exception as e:
             runtime_log.error('request_failed',e)
-            if isinstance(e,sqlite3.Error) and p.startswith('/api/learning/'):
+            if isinstance(e,sqlite3.Error) and re.fullmatch(r'/api/tasks/[A-Za-z0-9_-]{1,64}',p):
+                self.send(500,{'error':'任务状态数据库写入失败，请核对同一请求后再操作。','category':'database'})
+            elif isinstance(e,sqlite3.Error) and p.startswith('/api/learning/'):
                 self.send(500,{'error':str(LearningError('database')),'category':'database'})
             else:self.send(500,{'error':'本机处理未完成，请稍后重试。没有自动重复提交。'})
 

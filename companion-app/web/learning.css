@@ -11,6 +11,9 @@
 .learning-heading{justify-content:space-between}.learning-page summary{cursor:pointer;margin:12px 0;font-weight:600}
 .learning-record{padding:8px;border-bottom:1px solid #d9e2ed}.learning-page button{cursor:pointer}
 #learning-status{white-space:pre-wrap;color:#365b7f;overflow-wrap:anywhere}
+#learning-task-feedback{position:sticky;top:0;z-index:5;margin:8px 0;padding:12px;border:2px solid #88afd3;border-radius:12px;background:#eef6ff;color:#254c70;white-space:pre-wrap;overflow-wrap:anywhere}
+#learning-task-feedback[hidden]{display:none}
+#learning-current,.learning-task{scroll-margin-top:80px}
 #learning-checks{border-top:1px solid #d9e2ed;margin-top:20px;overflow-wrap:anywhere}
 #learning-checks p{white-space:pre-wrap}
 #learning-checks[aria-busy=true]{opacity:.8;pointer-events:none}

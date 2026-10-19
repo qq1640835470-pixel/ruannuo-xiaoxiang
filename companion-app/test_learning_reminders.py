@@ -66,7 +66,9 @@ class ReminderTests(unittest.TestCase):
         self.enable();self.assertIsNone(self.check());self.plan()
         first,second=self.tasks();self.update(first['id'],{'status':'done'});self.update(second['id'],{'status':'cancelled'})
         self.assertIsNone(self.check());summary=self.call('view')['summary'];self.assertEqual(summary['completed'],1);self.assertEqual(summary['remaining'],0)
-        self.update(first['id'],{'status':'pending'})
+        with self.assertRaisesRegex(ValueError,'已完成或已取消'):self.update(first['id'],{'status':'pending'})
+        with self.connect() as c:
+            agent_state.mutate(c,'tasks','create',{k:first[k] for k in ('title','details','scheduled_at','goal_id')})
         with self.connect() as c:agent_state.mutate(c,'goals','update',{'status':'cancelled'},first['goal_id'])
         self.assertIsNone(self.check())
 

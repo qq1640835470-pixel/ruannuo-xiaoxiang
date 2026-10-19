@@ -6,11 +6,11 @@
   const labels={course:'课程',scope:'学习范围（具体章节或主题）',start_date:'开始日期',deadline:'截止日期',daily_minutes:'每天可用分钟',level:'当前基础（不清楚可填“尚不清楚”）'};
   const kinds={study:'学习',review:'复习',practice:'练习'};
   const statuses={pending:'待开始',active:'进行中',paused:'暂停',deferred:'已延期',done:'完成',cancelled:'取消'};
-  let draft=null, busy=false, pendingRecord=null, focusTaskId=null, pendingTask=null;
+  let draft=null, busy=false, pendingRecord=null, focusTaskId=null, pendingTask=null, taskFeedback=null;
   function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
   function message(text){$('#learning-status').textContent=text;}
   function persist(){
-    try{localStorage.setItem(storageKey,JSON.stringify({draft,request:$('#learning-request').value,requirements:readRequirements(),pendingRecord,pendingTask}));}
+    try{localStorage.setItem(storageKey,JSON.stringify({draft,request:$('#learning-request').value,requirements:readRequirements(),pendingRecord,pendingTask,taskFeedback}));}
     catch{message('浏览器未能保存草稿副本，请保持页面开启。');}
   }
   function field(parent,label,value,type='text',oninput=()=>{},max=500){
@@ -105,25 +105,43 @@
   }
   async function changeTask(task,status){
     if(pendingTask&&(pendingTask.id!==task.id||pendingTask.status!==status))throw new Error('请先核对上一项待处理任务状态。');
-    message('正在核对任务状态…');
+    const action=status==='active'?(task.status==='paused'?'继续学习':'开始'):status==='paused'?'暂停':status==='done'?'完成':'取消任务';
+    taskNotice(`正在${action}…`,task.id,status);
+    try{
     let current=await api(`/api/tasks/${task.id}`);
-    if(current.status!==status){
+    if(current.status!==status||pendingTask){
       pendingTask=pendingTask||{id:task.id,status,request_id:newRequest()};persist();
       const receipt=await api(`/api/tasks/${task.id}`,{method:'PATCH',body:JSON.stringify({status,request_id:pendingTask.request_id})});
       if(!receipt.ok||receipt.task?.id!==task.id||receipt.task.status!==status)throw new Error('未取得有效任务状态回执，请刷新核对。');
       current=await api(`/api/tasks/${task.id}`);
       if(current.status!==status)throw new Error('任务当前状态已变化，请刷新核对。');
-      message(`任务状态已保存并核对：“${current.title}”${statuses[status]}。`);
-    }else message(`“${current.title}”已经是${statuses[status]}，未重复写入。`);
+      taskNotice(`${status==='paused'?'任务已暂停':status==='active'?'任务已开始学习':status==='done'?'任务已完成':'任务已取消'}：“${current.title}”。已保存并核对。`,task.id,status,true);
+    }else taskNotice(`“${current.title}”已经是${statuses[status]}，未重复写入。`,task.id,status,true);
     pendingTask=null;persist();focusTaskId=task.id;await refresh();
     if(status==='active')$('#learning-current').scrollIntoView({block:'start'});
+    }catch(e){
+      taskNotice(`${action}未完成：${e.message}${pendingTask?' 请核对同一待处理请求，勿另建请求。':''}`,task.id,status);
+      try{await refresh();}catch(refreshError){taskNotice(`${taskFeedback.text} 列表刷新也未完成：${refreshError.message}`,task.id,status);}
+      throw e;
+    }
+  }
+  function taskNotice(text,id,status,confirmed=false){
+    taskFeedback={text,id,status,confirmed};
+    const notice=$('#learning-task-feedback');notice.textContent=text;notice.hidden=false;
+    message(text);persist();
   }
   async function refresh(){
     const response=await api('/api/learning/plans');const area=$('#learning-plans');area.replaceChildren();
     if(pendingRecord)button(area,'重试待核学习记录',sendPending);
     if(!response.plans.length)area.append(node('p','还没有已保存的学习计划。'));
     const currentArea=$('#learning-current');currentArea.replaceChildren();
-    const studying=response.plans.flatMap(p=>p.tasks).filter(t=>t.status==='active');
+    const allTasks=response.plans.flatMap(p=>p.tasks);
+    if(taskFeedback){
+      const current=allTasks.find(t=>t.id===taskFeedback.id);
+      if(taskFeedback.confirmed&&current?.status!==taskFeedback.status)taskNotice(current?`任务当前状态：${statuses[current.status]}，先前操作结果已变化。`:'任务已不在计划列表中，请核对。',taskFeedback.id,current?.status);
+      const notice=$('#learning-task-feedback');notice.textContent=taskFeedback.text;notice.hidden=false;
+    }
+    const studying=allTasks.filter(t=>t.status==='active');
     currentArea.hidden=!studying.length;
     if(studying.length){currentArea.append(node('h3','当前正在学习'));for(const task of studying){currentArea.append(node('p',task.title));button(currentArea,'完成本次任务',()=>changeTask(task,'done'));button(currentArea,'暂停学习',()=>changeTask(task,'paused'));button(currentArea,'记录学习收获与实际分钟',async()=>{focusTaskId=task.id;await refresh();root.querySelector(`[data-task-id="${CSS.escape(task.id)}"] .learning-progress textarea`)?.focus();});}}
     if(pendingTask)button(currentArea,'核对待处理任务状态',()=>changeTask({id:pendingTask.id},pendingTask.status));
@@ -149,11 +167,12 @@
           const card=node('article',undefined,'learning-task');card.dataset.taskId=task.id;card.classList.toggle('is-active',task.status==='active');
           card.append(node('h4',task.title),node('p',`${task.scheduled_at.slice(0,10)} · ${statuses[task.status]} · ${kinds[task.learning.kind]} · 建议 ${task.learning.minutes} / 实际 ${task.actual_minutes} 分钟`),node('p',task.learning.content),node('p',`预期成果：${task.learning.outcome}`));
           const actions=node('div',undefined,'learning-actions');
-          for(const [status,label] of [['active','开始'],['done','完成'],['paused','暂停'],['cancelled','取消任务']]){const b=button(actions,label,async()=>{b.textContent=status==='active'?'正在开始…':'正在保存…';try{await changeTask(task,status);}finally{b.textContent=label;}});}
+          const terminal=['done','cancelled'].includes(task.status);
+          if(!terminal)for(const [status,label] of [['active',task.status==='paused'?'继续学习':'开始'],['done','完成'],...(task.status==='active'?[['paused','暂停']]:[]),['cancelled','取消任务']]){const b=button(actions,label,async()=>{b.textContent=`正在${label}…`;try{await changeTask(task,status);}finally{b.textContent=label;}});}
           card.append(actions);
           button(card,'检验学习成果',async()=>{window.LearningChecks?.choose(task);});
-          const defer=node('form',undefined,'learning-actions'),when=field(defer,'延期至',task.scheduled_at.slice(0,10),'date');const b=node('button','延期','subtle-button');defer.append(b);card.append(defer);
-          defer.onsubmit=e=>{e.preventDefault();run(async()=>{await api(`/api/tasks/${task.id}`,{method:'PATCH',body:JSON.stringify({status:'deferred',scheduled_at:when.value,request_id:newRequest()})});message('延期已保存。');await refresh();});};
+          if(!terminal){const defer=node('form',undefined,'learning-actions'),when=field(defer,'延期至',task.scheduled_at.slice(0,10),'date');const b=node('button','延期','subtle-button');defer.append(b);card.append(defer);
+          defer.onsubmit=e=>{e.preventDefault();run(async()=>{await api(`/api/tasks/${task.id}`,{method:'PATCH',body:JSON.stringify({status:'deferred',scheduled_at:when.value,request_id:newRequest()})});message('延期已保存。');await refresh();});};}
           progressView(card,task);group.append(card);
         }box.append(group);
       }area.append(box);
@@ -175,7 +194,7 @@
   $('#learning-refresh').onclick=()=>run(refresh);
   $('#learning-request').addEventListener('input',persist);
   requirementsFields();
-  try{const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored){draft=stored.draft;pendingRecord=stored.pendingRecord;pendingTask=stored.pendingTask;$('#learning-request').value=stored.request||'';requirementsFields(stored.requirements||{});}}catch{message('本机草稿无法恢复，请重新填写。');}
+  try{const stored=JSON.parse(localStorage.getItem(storageKey)||'null');if(stored){draft=stored.draft;pendingRecord=stored.pendingRecord;pendingTask=stored.pendingTask;taskFeedback=stored.taskFeedback;$('#learning-request').value=stored.request||'';requirementsFields(stored.requirements||{});}}catch{message('本机草稿无法恢复，请重新填写。');}
   editor();window.addEventListener('learning-open',()=>run(refresh));
   if(location.hash==='#learning')changePage('learning');
 })();
