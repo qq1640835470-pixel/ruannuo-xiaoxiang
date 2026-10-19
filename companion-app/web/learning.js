@@ -129,6 +129,7 @@
           const actions=node('div',undefined,'learning-actions');
           for(const [status,label] of [['active','开始'],['done','完成'],['paused','暂停'],['cancelled','取消任务']])button(actions,label,async()=>{await api(`/api/tasks/${task.id}`,{method:'PATCH',body:JSON.stringify({status,request_id:newRequest()})});message('任务状态已保存；掌握程度未作推断。');await refresh();});
           card.append(actions);
+          button(card,'检验学习成果',async()=>{window.LearningChecks?.choose(task);});
           const defer=node('form',undefined,'learning-actions'),when=field(defer,'延期至',task.scheduled_at.slice(0,10),'date');const b=node('button','延期','subtle-button');defer.append(b);card.append(defer);
           defer.onsubmit=e=>{e.preventDefault();run(async()=>{await api(`/api/tasks/${task.id}`,{method:'PATCH',body:JSON.stringify({status:'deferred',scheduled_at:when.value,request_id:newRequest()})});message('延期已保存。');await refresh();});};
           progressView(card,task);group.append(card);

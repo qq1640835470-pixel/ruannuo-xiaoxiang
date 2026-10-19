@@ -11,5 +11,11 @@
 .learning-heading{justify-content:space-between}.learning-page summary{cursor:pointer;margin:12px 0;font-weight:600}
 .learning-record{padding:8px;border-bottom:1px solid #d9e2ed}.learning-page button{cursor:pointer}
 #learning-status{white-space:pre-wrap;color:#365b7f;overflow-wrap:anywhere}
+#learning-checks{border-top:1px solid #d9e2ed;margin-top:20px;overflow-wrap:anywhere}
+#learning-checks p{white-space:pre-wrap}
+#learning-checks[aria-busy=true]{opacity:.8;pointer-events:none}
+.learning-page .check-option{flex-direction:row;align-items:center;margin:10px 0}
+.learning-page .check-option input{width:auto;flex-shrink:0}
+#check-status{color:#365b7f}
 .learning-page[aria-busy=true]{opacity:.8;pointer-events:none}
 @media(max-width:650px){.learning-grid{grid-template-columns:1fr}.learning-page form,.learning-plan{padding:10px}}

@@ -13,6 +13,7 @@
   <script src="/diagnostics.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/learning.js" defer></script>
+  <script src="/learning-checks.js" defer></script>
   <link rel="stylesheet" href="/learning.css">
   <script src="/chat-attachments.js" defer></script>
   <script src="/feedback-target.js" defer></script>
@@ -71,6 +72,16 @@
         <form id="learning-requirements"><h3>请核对并补充关键信息</h3><p id="learning-questions"></p><div id="learning-fields" class="learning-grid"></div><button class="primary-button" type="submit">信息已核对，生成计划草稿</button></form>
         <div id="learning-draft" hidden></div>
         <div class="learning-heading"><h3>已保存计划</h3><button id="learning-refresh" class="subtle-button">刷新学习状态</button></div><div id="learning-plans"></div>
+        <section id="learning-checks" aria-label="学习成果检验">
+          <h3>学习成果检验</h3><p>任务完成、测验表现和真正掌握程度分别记录。模型建议可更正，不形成长期事实。</p>
+          <p id="check-status" role="status"></p><div id="check-pending"></div><div id="check-selection"></div>
+          <button id="check-topic-mode" type="button" class="subtle-button">改用自选知识点（不关联任务）</button>
+          <form id="check-generate"><label>自选具体知识点（选任务时不发送此栏）<textarea id="check-topic" maxlength="1000" rows="2"></textarea></label>
+            <label>题目数量<select id="check-count"><option value="3">3题</option><option value="4">4题</option><option value="5">5题</option></select></label>
+            <button class="primary-button" type="submit">发送所选范围，生成测验（可能计费）</button>
+          </form><div id="check-current"></div>
+          <div class="learning-heading"><h3>历史检验记录</h3><button id="check-refresh" type="button" class="subtle-button">刷新检验历史</button></div><div id="check-history"></div>
+        </section>
       </section>
       <section id="plan-page" class="page plan-page" aria-label="计划日程" hidden>
         <div class="plan-intro"><button class="primary-button" id="new-task-button">＋ 记一件事</button></div>

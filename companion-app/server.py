@@ -3,7 +3,7 @@ from __future__ import annotations
 import app_paths
 import base64, binascii
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
-import activity_monitor, speech_service, chat_attachments, agent_state, learning
+import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks
 import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes, local_models, local_adaptation
 import connectors, providers, feedback_bridge, runtime_log, local_features, web_tools, music_service, companion_knowledge, persistent_memory, model_routing, typed_tools
 
@@ -55,6 +55,7 @@ def init():
         c.execute("UPDATE feedback_delivery SET status='unknown',detail='服务重新启动，原发送状态待核对；未自动重发。' WHERE status='sending'")
         for k,v in DEFAULT_SETTINGS.items():c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,json.dumps(v,ensure_ascii=False)))
         agent_state.init(c)
+        learning_checks.init(c)
         persistent_memory.init(c)
         chat_history.init(c)
         if not c.execute("SELECT 1 FROM settings WHERE key='memory_backfill_v2'").fetchone():
@@ -770,6 +771,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p=='/api/learning/plans':
                 with connect() as c:result=learning.listing(c)
                 return self.send(200,{'plans':result})
+            if p=='/api/learning/checks':
+                with connect() as c:result=learning_checks.listing(c)
+                return self.send(200,{'checks':result})
+            match=re.fullmatch(r'/api/learning/checks/([A-Za-z0-9_-]{1,64})',p)
+            if match:
+                with connect() as c:result=learning_checks.get(c,match[1])
+                return self.send(200,result)
             if p in ('/api/goals','/api/tasks'):
                 with connect() as c:result=agent_state.read(c,'goals' if p.endswith('goals') else 'tasks')
                 return self.send(200,{'goals' if p.endswith('goals') else 'tasks':result})
@@ -861,6 +869,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.permitted(True):return self.send(403,{'error':'请求来源或本机会话无效，请重新打开助手。'})
         try:
             b=self.body();p=urllib.parse.urlsplit(self.path).path
+            if method=='POST' and p=='/api/learning/checks':
+                return self.send(200,learning_checks.execute(connect,'generate',b,learning_model))
+            match=re.fullmatch(r'/api/learning/checks/([A-Za-z0-9_-]{1,64})(?:/(submit))?',p)
+            if match:
+                ident,submit=match.groups()
+                operation='submit' if method=='POST' and submit else 'correct' if method=='PATCH' and not submit else 'delete' if method=='DELETE' and not submit else None
+                if not operation:raise ValueError('不支持此测验操作。')
+                return self.send(200,learning_checks.execute(connect,operation,b,learning_model,ident))
             if method=='POST' and p=='/api/learning/generate':return self.send(200,learning.generate(b,learning_model,now()[:10]))
             if method=='POST' and p=='/api/learning/confirm':return self.send(200,learning_save(b))
             if method=='POST' and p=='/api/chat/attachments':return self.send(200,chat_attachments.store(b,DATA))
