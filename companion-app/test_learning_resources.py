@@ -136,6 +136,34 @@ class ResourceTests(unittest.TestCase):
             self.assertEqual(out['result']['errors'][0]['code'], code);self.assertEqual(transport.call_count, 1)
         self.assertEqual(self.fixture.search_calls, [])
 
+    def test_nullable_key_limit_and_explicit_free_account_confirmation(self):
+        value = copy.deepcopy(FREE)
+        value['key']['limit'] = None
+        resources.free_allowance(value, 3)
+        value['account'].update(plan_limit=1500, paygo_limit=None)
+        with self.assertRaises(resources.ResourceError) as error:
+            resources.free_allowance(value, 3)
+        self.assertEqual(error.exception.code, 'free_only')
+        resources.free_allowance(value, 3, confirmed_free_limit=1500)
+        for change in ({'paygo_limit': 1}, {'paygo_usage': 1}, {'current_plan': 'Bootstrap'}, {'plan_limit': 2000}):
+            altered = copy.deepcopy(value)
+            altered['account'].update(change)
+            with self.assertRaises(resources.ResourceError):
+                resources.free_allowance(altered, 3, confirmed_free_limit=1500)
+        for group, field in (('key', 'limit'), ('account', 'paygo_limit')):
+            altered = copy.deepcopy(value)
+            del altered[group][field]
+            with self.assertRaises(resources.ResourceError):
+                resources.free_allowance(altered, 3, confirmed_free_limit=1500)
+        value['account']['plan_usage'] = 1498
+        with self.assertRaises(resources.ResourceError) as error:
+            resources.free_allowance(value, 3, confirmed_free_limit=1500)
+        self.assertEqual(error.exception.code, 'quota')
+        value['account']['plan_usage'] = 0
+        value['key']['limit'] = 2
+        with self.assertRaises(resources.ResourceError):
+            resources.free_allowance(value, 3, confirmed_free_limit=1500)
+
     def test_empty_and_unrelated_never_fabricated(self):
         for i, rows in enumerate([[], [ROWS[4]], [{'title': '差分放大电路资料', 'url': 'https://course.example.org/', 'content': '差分放大电路'}]]):
             def transport(path, key, body=None):return FREE if path == 'usage' else {'results': rows, 'usage': {'credits': 1}}

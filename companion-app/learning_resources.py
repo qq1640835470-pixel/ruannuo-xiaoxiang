@@ -133,15 +133,18 @@ def load_key(hub):
     return key
 
 
-def free_allowance(value, needed):
+def free_allowance(value, needed, confirmed_free_limit=None):
     account = value.get('account', {});key = value.get('key', {})
     if not isinstance(account, dict) or not isinstance(key, dict):raise ResourceError('free_only')
     fields = [account.get(k) for k in ('plan_usage', 'plan_limit', 'paygo_usage', 'paygo_limit')]+[key.get(k) for k in ('usage', 'limit')]
-    if any(type(n) is not int or n < 0 for n in fields):raise ResourceError('free_only')
     used, limit, pay_used, pay_limit, key_used, key_limit = fields
-    if str(account.get('current_plan', '')).lower() not in ('researcher', 'free') or not 0 < limit <= 1000 or pay_used != 0 or pay_limit != 0:
+    if any(type(n) is not int or n < 0 for n in (used, limit, pay_used, key_used)):raise ResourceError('free_only')
+    if 'limit' not in key or key_limit is not None and (type(key_limit) is not int or key_limit < 0):raise ResourceError('free_only')
+    confirmed = type(confirmed_free_limit) is int and confirmed_free_limit > 0 and limit == confirmed_free_limit
+    if 'paygo_limit' not in account or not (type(pay_limit) is int and pay_limit == 0 or pay_limit is None and confirmed):raise ResourceError('free_only')
+    if str(account.get('current_plan', '')).lower() not in ('researcher', 'free') or not (0 < limit <= 1000 or confirmed) or pay_used != 0:
         raise ResourceError('free_only')
-    if limit-used < needed or (key_limit > 0 and key_limit-key_used < needed):raise ResourceError('quota')
+    if limit-used < needed or (key_limit is not None and key_limit > 0 and key_limit-key_used < needed):raise ResourceError('quota')
 
 
 def public_url(value):
@@ -212,7 +215,7 @@ def receipt(c, ident, fingerprint=None):
     return json.loads(row['response'])
 
 
-def execute(connect, operation, body, hub=None, model=None):
+def execute(connect, operation, body, hub=None, model=None, confirmed_free_limit=None):
     allowed = {'analyze': {'request_id', 'text', 'model_selection', 'confirmed'},
                'search': {'request_id', 'requirements', 'queries', 'confirmed'}}
     if operation not in allowed or not isinstance(body, dict) or set(body) != allowed[operation] or body['confirmed'] is not True:raise ValueError('请核对并确认本次请求。')
@@ -235,7 +238,7 @@ def execute(connect, operation, body, hub=None, model=None):
                 key = load_key(hub);raw_rows = [];errors = [];credits = 0;uncertain = False
                 for index, query in enumerate(qs):
                     try:
-                        free_allowance(request_json('usage', key), len(qs)-index)
+                        free_allowance(request_json('usage', key), len(qs)-index, confirmed_free_limit)
                         with connect() as c:c.execute('INSERT INTO learning_search_calls VALUES(?,?,?,?,?)', (ident, index, 'pending', None, stamp()))
                         data = request_json('search', key, {'query': query['query'], 'topic': 'general', 'search_depth': 'basic',
                             'max_results': 8, 'auto_parameters': False, 'include_answer': False, 'include_raw_content': False,
