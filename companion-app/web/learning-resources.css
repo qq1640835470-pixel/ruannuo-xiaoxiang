@@ -1,0 +1,10 @@
+.learning-resource-panel{margin:16px 0;padding:14px;border:1px solid #c7d7e8;border-radius:12px;min-width:0}
+.learning-resource-panel>summary{cursor:pointer;font-weight:bold}
+.learning-resource-panel label{display:block;margin:8px 0;min-width:0}
+.learning-resource-panel textarea,.learning-resource-panel input:not([type=checkbox]),.learning-resource-panel select{max-width:100%;box-sizing:border-box;width:100%}
+.learning-resource-panel .check-option{display:inline-flex;gap:6px;margin-right:14px;align-items:center}
+.learning-resource-panel fieldset{min-width:0}
+.learning-resource-panel a,.learning-resource-panel p{overflow-wrap:anywhere}
+.learning-resource-panel .resource-card{padding:12px;margin:10px 0;background:#f5f8fc;border:1px solid #d6e1ed;border-radius:8px}
+#resources-status{position:sticky;top:0;z-index:2;background:#fff;padding:8px;border-radius:6px}
+.learning-resource-panel button{white-space:normal;max-width:100%;margin:4px 4px 4px 0}

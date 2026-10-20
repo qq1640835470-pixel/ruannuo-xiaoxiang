@@ -13,6 +13,8 @@
   <script src="/diagnostics.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/learning.js" defer></script>
+  <script src="/learning-resources.js" defer></script>
+  <link rel="stylesheet" href="/learning-resources.css">
   <script src="/learning-checks.js" defer></script>
   <script src="/learning-adjustments.js" defer></script>
   <script src="/learning-reminders.js" defer></script>
@@ -86,6 +88,25 @@
         <p id="reminder-status" role="status"></p><p class="muted-text">先核对需求，再生成草稿；确认后才保存。完成任务不等于已经掌握。</p>
         <p class="muted-text">点击分析或生成时，仅本页填写的需求发送给设置中所选模型；云模型可能计费。已有学习记录和备注不会自动发送。</p>
         <p id="learning-status" role="status"></p>
+        <details id="learning-resources" class="learning-resource-panel">
+          <summary>寻找学习资源</summary>
+          <p>输入需求后可让学习模型整理，也可直接填写知识点。整理需求可能产生模型费用；搜索只使用 Tavily Basic 免费额度。保存前不会修改学习计划。</p>
+          <label>资源需求<textarea id="resources-request" rows="3" maxlength="2500" placeholder="我想学习模拟电子技术中的差分放大电路，基础一般，帮我找视频、讲义和练习题。"></textarea></label>
+          <button id="resources-analyze" type="button" class="subtle-button">用学习模型整理需求</button>
+          <form id="resources-form">
+            <div class="learning-grid"><label>课程（可空）<input id="resources-course" maxlength="100"></label><label>具体知识点<input id="resources-topic" required maxlength="120"></label><label>当前基础<input id="resources-level" required maxlength="100" value="未知"></label></div>
+            <fieldset><legend>资源类型（综合可全选）</legend><label class="check-option"><input id="resources-video" type="checkbox" checked>视频</label><label class="check-option"><input id="resources-text" type="checkbox" checked>教材/讲义</label><label class="check-option"><input id="resources-practice" type="checkbox" checked>练习题</label></fieldset>
+            <button type="submit" class="subtle-button">预览搜索关键词（不联网）</button>
+          </form>
+          <div id="resources-preview" hidden></div>
+          <p>Tavily Key 需在本机配置；缺少凭据时明确停止。每次搜索前核对免费套餐、剩余额度与按量付费关闭状态，状态不明不搜索。不要在需求或关键词中填写私人资料、Key或账号信息。</p>
+          <p id="resources-status" role="status" aria-live="polite"></p>
+          <button id="resources-recover" type="button" class="subtle-button" hidden>核对原请求回执（不重发）</button>
+          <button id="resources-dismiss" type="button" class="subtle-button" hidden>放弃本地待核对标记（不重发）</button>
+          <div id="resources-results"></div>
+          <div class="learning-actions"><label>可选关联现有学习任务<select id="resources-task"><option value="">独立保存，不关联任务</option></select></label><button id="resources-save" type="button" class="primary-button" disabled>保存勾选资源</button><button id="resources-refresh" type="button" class="subtle-button">刷新已保存资源和任务</button></div>
+          <div id="resources-saved"></div>
+        </details>
         <form id="learning-input"><label>想学什么<textarea id="learning-request" rows="3" maxlength="2500" placeholder="我想在7天内复习完电路分析，每天约2小时。"></textarea></label><button class="subtle-button" type="submit">分析学习需求</button></form>
         <form id="learning-requirements"><h3>请核对并补充关键信息</h3><p id="learning-questions"></p><div id="learning-fields" class="learning-grid"></div><button class="primary-button" type="submit">信息已核对，生成计划草稿</button></form>
         <div id="learning-draft" hidden></div>

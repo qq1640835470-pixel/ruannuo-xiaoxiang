@@ -5,7 +5,7 @@ import model_center
 from learning_diagnostics import LearningError, category as learning_failure
 import base64, binascii
 import math, contextlib, datetime as dt, hashlib, http.server, json, mimetypes, os, pathlib, re, secrets, sqlite3, threading, time, urllib.parse, urllib.error, uuid
-import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks, learning_adjustments, learning_reminders
+import activity_monitor, speech_service, chat_attachments, agent_state, learning, learning_checks, learning_adjustments, learning_reminders, learning_resources
 import maps_service, location_service, chat_history, local_runtime, local_intents, maps_routes, local_models, local_adaptation
 import connectors, providers, feedback_bridge, runtime_log, local_features, web_tools, music_service, companion_knowledge, persistent_memory, model_routing, typed_tools
 
@@ -61,6 +61,7 @@ def init():
         learning_checks.init(c)
         learning_adjustments.init(c)
         learning_reminders.init(c)
+        learning_resources.init(c)
         persistent_memory.init(c)
         chat_history.init(c)
         if not c.execute("SELECT 1 FROM settings WHERE key='memory_backfill_v2'").fetchone():
@@ -266,6 +267,9 @@ def learning_model_preview(body):
         try:learning.generate({**payload,'stage':operation},capture,now()[:10])
         except PreviewReady:pass
         content=captured[0]
+    elif operation=='resource_analyze':
+        if set(payload)!={'text'}:raise ValueError('资源解析预览参数无效。')
+        content=learning.text(payload['text'],2500)
     elif operation=='check':
         with connect() as c:selected,_,_=learning_checks.scope(c,payload)
         content=json.dumps(selected,ensure_ascii=False)
@@ -886,6 +890,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with connect() as c:result=model_center.catalogue(c,VERSION)
                 return self.send(200,result)
             if p=='/api/learning/reminders':return self.send(200,reminder_call('view'))
+            if p=='/api/learning/resources':
+                with connect() as c:result=learning_resources.listing(c)
+                return self.send(200,result)
+            if p=='/api/learning/resources/receipt':
+                ident=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('id',[''])[0]
+                with connect() as c:result=learning_resources.receipt(c,ident)
+                return self.send(200,result)
             if p=='/api/learning/plans':
                 with connect() as c:result=learning.listing(c)
                 return self.send(200,{'plans':result})
@@ -996,6 +1007,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             b=self.body();p=urllib.parse.urlsplit(self.path).path
             if method=='POST' and p=='/api/learning/model-preview':return self.send(200,learning_model_preview(b))
+            if method=='POST' and p=='/api/learning/resources/preview':
+                return self.send(200,learning_resources.plan(b))
+            if method=='POST' and p=='/api/learning/resources/analyze':
+                return self.send(200,learning_resources.execute(connect,'analyze',b,model=learning_call(b.get('model_selection'))))
+            if method=='POST' and p=='/api/learning/resources/search':
+                return self.send(200,learning_resources.execute(connect,'search',b,hub=providers.hub))
+            if method=='POST' and p=='/api/learning/resources/save':
+                with LOCK,connect() as c:result=learning_resources.save(c,b)
+                return self.send(200,result)
             if method=='POST' and p=='/api/learning/adjustments/preview':
                 if not isinstance(b,dict) or set(b)!={'selection'}:raise ValueError('预览参数无效。')
                 selected=learning_selection()
