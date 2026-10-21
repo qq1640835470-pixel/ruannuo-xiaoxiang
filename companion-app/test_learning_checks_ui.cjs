@@ -26,7 +26,8 @@ const base=process.argv[2];if(!base)throw new Error('Use the isolated Python run
    return route.continue();
   });
   await page.context().request.get(base+'/');await page.goto(base+'/');await page.locator('[data-page=learning]').click();
-  await page.locator('#learning-plans .learning-task').first().getByRole('button',{name:'检验学习成果',exact:true}).click();
+  await page.locator('#learning-saved').click();await page.locator('.learning-plan>summary').first().click();await page.locator('#learning-plans [data-task-entry] button').first().click();
+  await page.locator('#learning-task-workspace .learning-task').first().getByRole('button',{name:'检验学习成果',exact:true}).click();
   assert.match(await page.locator('#check-selection').textContent(),/所选任务/);
   await page.locator('#check-generate button').click();await page.locator('#check-pending button').first().waitFor();
   await page.waitForFunction(()=>!document.querySelector('#learning-checks').hasAttribute('aria-busy'));
@@ -46,12 +47,12 @@ const base=process.argv[2];if(!base)throw new Error('Use the isolated Python run
   assert.match(await page.locator('#check-current').textContent(),/客观题：1 \/ 2/);assert.match(await page.locator('#check-current').textContent(),/遗漏定义/);
   const first=page.locator('#check-current fieldset').first();await first.locator('summary').click();await first.locator('select').selectOption('uncertain');await first.locator('textarea').fill('参考解释需要核对教材');await first.getByRole('button',{name:'保存评价更正',exact:true}).click();
   await page.locator('#check-current').getByText('用户更正：未可靠评价 · 参考解释需要核对教材',{exact:true}).waitFor();
-  await page.reload();await page.locator('#check-current').getByText('用户更正：未可靠评价 · 参考解释需要核对教材',{exact:true}).waitFor();
+  await page.reload();await page.locator('#learning-checks>summary').click();await page.locator('#check-current').getByText('用户更正：未可靠评价 · 参考解释需要核对教材',{exact:true}).waitFor();
   assert.equal(await page.locator('#check-history .learning-record').count(),1);
   assert.match(await page.locator('#learning-plans').textContent(),/完成 0 \/ 2/);
   await page.locator('#check-history').getByRole('button',{name:'删除测验记录',exact:true}).click();await page.locator('#check-history').getByText('暂无检验记录。',{exact:true}).waitFor();
   const cleared=await page.evaluate(()=>JSON.parse(localStorage.getItem('xiaoxiang-learning-check-pending-v1')));assert.equal(cleared.activeId,undefined);assert.deepEqual(cleared.answers,{});
-  await page.reload();await page.locator('#check-history').getByText('暂无检验记录。',{exact:true}).waitFor();assert.equal(await page.locator('#check-current fieldset').count(),0);
+  await page.reload();await page.locator('#learning-checks>summary').click();await page.locator('#check-history').getByText('暂无检验记录。',{exact:true}).waitFor();assert.equal(await page.locator('#check-current fieldset').count(),0);
   await page.locator('#check-topic-mode').click();await page.locator('#check-topic').fill('节点法');await page.locator('#check-generate button').click();await page.locator('#check-current fieldset').first().waitFor();
   assert.equal(writes.at(-1).topic,'节点法');assert.equal(writes.at(-1).task_id,undefined);
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);

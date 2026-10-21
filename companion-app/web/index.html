@@ -74,12 +74,15 @@
         <form id="chat-form" class="composer"><label class="sr-only" for="chat-input">告诉我想做的事</label><textarea id="chat-input" rows="2" placeholder="说说你想做的事…" maxlength="3000"></textarea><div class="composer-footer"><span>Enter 发送 · Shift + Enter 换行</span><button type="submit" id="send-button" class="send-button" aria-label="发送消息">↑</button></div></form>
       </section>
       <section id="learning-page" class="page learning-page" aria-label="学习" hidden>
-        <h2>学习计划</h2>
+        <div class="learning-heading"><h2>学习工作台</h2><button id="learning-refresh" class="subtle-button">刷新学习状态</button></div>
+        <div class="learning-actions"><button id="learning-new" type="button" class="primary-button">新建学习计划</button><button id="learning-saved" type="button" class="subtle-button">已保存学习计划</button></div>
         <p id="learning-model-current" role="status">正在读取学习模型。</p>
-        <p id="learning-model-evidence" class="muted-text"></p>
+        <details><summary>模型详情与安全说明</summary><p id="learning-model-evidence" class="muted-text"></p><p>只有确认后才会调用模型或真实搜索；云模型可能计费。学习记录不会自动发送。</p></details>
         <p id="learning-task-feedback" role="status" aria-live="polite" hidden></p>
         <section id="learning-current" role="region" aria-label="当前正在学习" hidden></section>
-        <section id="learning-review" aria-label="今日学习回顾"></section>
+        <section id="learning-today" aria-label="今日与逾期任务"></section>
+        <section id="learning-task-workspace" aria-label="当前任务工作区" hidden></section>
+        <details><summary>今日学习回顾</summary><section id="learning-review" aria-label="今日学习回顾"></section></details>
         <details id="learning-reminder-settings"><summary>应用内学习提醒（默认关闭）</summary><p>只在软件运行且页面可见时检查，不调用模型。关闭软件后不继续提醒；多任务合并展示。</p><p id="reminder-pause-indicator"></p><form id="reminder-settings-form">
           <label class="check-option"><input id="reminder-enabled" type="checkbox">启用应用内学习提醒</label>
           <div class="learning-grid"><label>提醒时段开始<input id="reminder-window-start" type="time" required></label><label>提醒时段结束<input id="reminder-window-end" type="time" required></label><label>勿扰开始<input id="reminder-quiet-start" type="time" required></label><label>勿扰结束<input id="reminder-quiet-end" type="time" required></label><label>每日主动提醒上限（含稍后提醒）<input id="reminder-limit" type="number" min="1" max="8" required></label></div>
@@ -99,19 +102,20 @@
             <button type="submit" class="subtle-button">预览搜索关键词（不联网）</button>
           </form>
           <div id="resources-preview" hidden></div>
-          <p>Tavily Key 需在本机配置；缺少凭据时明确停止。每次搜索前核对免费套餐、剩余额度与按量付费关闭状态，状态不明不搜索。不要在需求或关键词中填写私人资料、Key或账号信息。</p>
+          <details><summary>搜索权限与数据说明</summary><p>Tavily Key 需在本机配置；缺少凭据时明确停止。每次搜索前核对免费套餐、剩余额度与按量付费关闭状态，状态不明不搜索。不要在需求或关键词中填写私人资料、Key或账号信息。</p></details>
           <p id="resources-status" role="status" aria-live="polite"></p>
           <button id="resources-recover" type="button" class="subtle-button" hidden>核对原请求回执（不重发）</button>
           <button id="resources-dismiss" type="button" class="subtle-button" hidden>放弃本地待核对标记（不重发）</button>
-          <div id="resources-results"></div>
+          <details id="resources-receipt-details"><summary>请求与回执记录</summary></details><div id="resources-results"></div>
           <div class="learning-actions"><label>可选关联现有学习任务<select id="resources-task"><option value="">独立保存，不关联任务</option></select></label><button id="resources-save" type="button" class="primary-button" disabled>保存勾选资源</button><button id="resources-refresh" type="button" class="subtle-button">刷新已保存资源和任务</button></div>
           <div id="resources-saved"></div>
         </details>
+        <details id="learning-create"><summary>新建计划 / 当前草稿</summary>
         <form id="learning-input"><label>想学什么<textarea id="learning-request" rows="3" maxlength="2500" placeholder="我想在7天内复习完电路分析，每天约2小时。"></textarea></label><button class="subtle-button" type="submit">分析学习需求</button></form>
         <form id="learning-requirements"><h3>请核对并补充关键信息</h3><p id="learning-questions"></p><div id="learning-fields" class="learning-grid"></div><button class="primary-button" type="submit">信息已核对，生成计划草稿</button></form>
-        <div id="learning-draft" hidden></div>
-        <div class="learning-heading"><h3>已保存计划</h3><button id="learning-refresh" class="subtle-button">刷新学习状态</button></div><div id="learning-plans"></div>
-        <section id="learning-checks" aria-label="学习成果检验">
+        <div id="learning-draft" hidden></div></details>
+        <details id="learning-library"><summary>已保存计划与全部任务</summary><div id="learning-plans"></div></details>
+        <details id="learning-checks" aria-label="学习成果检验"><summary>学习成果检验与历史</summary>
           <h3>学习成果检验</h3><p>任务完成、测验表现和真正掌握程度分别记录。模型建议可更正，不形成长期事实。</p>
           <p id="check-status" role="status"></p><div id="check-pending"></div><div id="check-selection"></div>
           <button id="check-topic-mode" type="button" class="subtle-button">改用自选知识点（不关联任务）</button>
@@ -120,7 +124,7 @@
             <button class="primary-button" type="submit">发送所选范围，生成测验（可能计费）</button>
           </form><div id="check-current"></div>
           <div class="learning-heading"><h3>历史检验记录</h3><button id="check-refresh" type="button" class="subtle-button">刷新检验历史</button></div><div id="check-history"></div>
-        </section>
+        </details>
         <section id="learning-adjustments" aria-label="学习计划动态调整" hidden>
           <h3>学习计划动态调整</h3><p>先选依据并预览，再生成有限调整建议；确认保存前，正式计划不变。完成任务不等于掌握。</p>
           <p id="adjustment-status" role="status"></p><div id="adjustment-pending"></div>

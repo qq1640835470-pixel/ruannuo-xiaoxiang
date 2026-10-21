@@ -15,7 +15,7 @@ const base=process.argv[2];if(!base?.startsWith('http://127.0.0.1:'))throw new E
     }return route.continue();
   });
   await page.goto(base+'/');await page.locator('[data-page=learning]').click();
-  await page.locator('#learning-review').getByText(/未知 \/ 未填写/).waitFor();assert.equal(await page.locator('#learning-reminder').isVisible(),false);
+  await page.locator('#learning-review').locator('..').locator('summary').click();await page.locator('#learning-review').getByText(/未知 \/ 未填写/).waitFor();assert.equal(await page.locator('#learning-reminder').isVisible(),false);
   await page.locator('#learning-reminder-settings summary').click();assert.equal(await page.locator('#reminder-enabled').isChecked(),false);
   await page.locator('#reminder-enabled').check();await page.locator('#reminder-settings-form button[type=submit]').click();
   await page.locator('#learning-reminder li').filter({hasText:'合成电路分析'}).waitFor();
@@ -40,7 +40,7 @@ const base=process.argv[2];if(!base?.startsWith('http://127.0.0.1:'))throw new E
   assert.equal((await get('/api/tasks/'+task.id)).title,'已在其他入口修改');
   // Remaining valid task is still aggregated; closing it never changes its status.
   await page.locator('#learning-reminder').getByRole('button',{name:'跳过 / 关闭'}).click();await page.locator('#learning-reminder').waitFor({state:'hidden'});
-  await page.reload();await page.locator('#learning-review').waitFor();assert.equal(await page.locator('#learning-reminder').isVisible(),false);
+  await page.reload();await page.locator('#learning-review').locator('..').locator('summary').click();await page.locator('#learning-review').waitFor();assert.equal(await page.locator('#learning-reminder').isVisible(),false);
   saved=(await get('/api/learning/plans')).plans[0];assert.equal(saved.tasks.find(t=>t.learning.kind==='practice').status,'pending');
   await api('/api/reminder-fixture/time',{days:1});await wake();await page.locator('#learning-reminder li').first().waitFor();
   await page.locator('#learning-reminder').getByRole('button',{name:'查看计划',exact:true}).first().click();await page.locator('#learning-reminder').waitFor({state:'hidden'});await page.waitForFunction(()=>document.querySelector('#learning-page').hidden===false);

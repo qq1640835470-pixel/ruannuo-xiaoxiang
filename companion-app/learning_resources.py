@@ -300,9 +300,14 @@ def save(c, body):
     return result
 
 
-def listing(c):
+def listing(c, task_id=''):
     rows = []
-    for row in c.execute('SELECT * FROM learning_resources ORDER BY saved_at DESC,id LIMIT 100'):
+    if task_id:
+        agent_state.get(c, 'tasks', agent_state.ident(task_id))
+        query = 'SELECT r.* FROM learning_resources r JOIN learning_resource_tasks l ON l.resource_id=r.id WHERE l.task_id=? ORDER BY r.saved_at DESC,r.id'
+        resources = c.execute(query, (task_id,))
+    else:resources = c.execute('SELECT * FROM learning_resources ORDER BY saved_at DESC,id LIMIT 100')
+    for row in resources:
         item = json.loads(row['payload']);item['saved_at'] = row['saved_at']
         item['tasks'] = [{'id': link['task_id'], 'title': link['title'] or '原任务已删除'} for link in c.execute('SELECT l.task_id,t.title FROM learning_resource_tasks l LEFT JOIN tasks t ON t.id=l.task_id WHERE l.resource_id=?', (row['id'],))]
         rows.append(item)

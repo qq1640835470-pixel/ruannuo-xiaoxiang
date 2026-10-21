@@ -27,7 +27,7 @@ const base=process.argv[2];if(!base)throw new Error('Use the isolated Python run
   const status=page.locator('#adjustment-status'),area=page.locator('#learning-adjustments');
   const getPlans=async()=>page.evaluate(async()=>await (await fetch('/api/learning/plans')).json());
   const before=await getPlans(),goalId=before.plans[0].goal.id,done=before.plans[0].tasks.find(t=>t.status==='done');
-  async function open(){await page.getByRole('button',{name:'调整学习计划',exact:true}).click();await status.filter({hasText:'请选择本次分析依据'}).waitFor();}
+  async function open(){await page.locator('#learning-saved').click();if(!await page.locator('.learning-plan').evaluate(n=>n.open))await page.locator('.learning-plan>summary').click();await page.getByRole('button',{name:'调整学习计划',exact:true}).click();await status.filter({hasText:'请选择本次分析依据'}).waitFor();}
   async function preview(note='依据所选记录补充练习'){
    await area.getByLabel('选择当前目标、原计划安排与完成标记（调整必需）',{exact:true}).check();
    await area.getByLabel('另包含待开始、进行中、暂停及延期任务的详细状态',{exact:true}).check();

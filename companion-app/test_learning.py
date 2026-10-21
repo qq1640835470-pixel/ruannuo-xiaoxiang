@@ -184,7 +184,7 @@ class LearningTests(unittest.TestCase):
         finally:srv.shutdown();srv.server_close();thread.join()
 
     def test_http_generate_confirm_read_auth_and_sanitized_db_failure(self):
-        with self.http() as (base,request):
+        with self.http() as (base,request),patch('server.now',return_value='2026-10-20T10:00:00+08:00'):
             with self.assertRaises(urllib.error.HTTPError) as exc:urllib.request.urlopen(base+'/api/learning/plans')
             self.assertEqual(exc.exception.code,403)
             with self.assertRaises(urllib.error.HTTPError) as exc:request('/api/learning/confirm',{},'POST',{'Origin':'https://evil.test'})

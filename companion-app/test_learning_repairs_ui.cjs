@@ -6,7 +6,8 @@ const base=process.argv[2];if(!base?.startsWith('http://127.0.0.1:'))throw Error
  const page=await browser.newPage(),errors=[];let writes=0;page.on('dialog',d=>d.accept());page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/tasks/*',route=>{if(route.request().method()==='PATCH')writes++;return route.continue();});
  await page.context().request.get(base+'/');await page.goto(base+'/#learning');
- const task=page.locator('#learning-plans .learning-task').first();await task.getByRole('button',{name:'开始',exact:true}).click();
+ await page.locator('#learning-today [data-task-entry] button').first().click();
+ const task=page.locator('#learning-task-workspace .learning-task').first();await task.getByRole('button',{name:'开始',exact:true}).click();
  await page.locator('#learning-current').filter({hasText:'复习节点法'}).waitFor();assert.equal(await page.locator('.learning-task.is-active').count(),1);assert.equal(writes,1);
  await task.getByRole('button',{name:'开始',exact:true}).click();await page.locator('#learning-status').filter({hasText:'未重复写入'}).waitFor();assert.equal(writes,1);
  await page.locator('#learning-current').getByRole('button',{name:'暂停学习',exact:true}).click();await page.locator('#learning-current').waitFor({state:'hidden'});

@@ -23,7 +23,8 @@ if(!base?.startsWith('http://127.0.0.1:'))throw Error('Isolated fixture only');
  });
  const get=async path=>(await page.context().request.get(base+path)).json();
  await page.goto(base+'/#learning');
- const card=page.locator(`#learning-plans [data-task-id="${id}"]`),feedback=page.locator('#learning-task-feedback');
+ if(mode!=='--baseline')await page.locator(`#learning-today [data-task-entry="${id}"] button`).click();
+ const card=page.locator(`#learning-task-workspace [data-task-id="${id}"]`),feedback=page.locator('#learning-task-feedback');
  const click=label=>card.getByRole('button',{name:label,exact:true}).click();
  const settle=()=>page.waitForFunction(()=>!document.querySelector('#learning-page').hasAttribute('aria-busy'));
  await click('开始');await settle();assert.equal((await get('/api/tasks/'+id)).status,'active');
@@ -77,7 +78,7 @@ if(!base?.startsWith('http://127.0.0.1:'))throw Error('Isolated fixture only');
  for(const status of ['active','paused']){const response=await page.context().request.patch(base+'/api/tasks/'+id,{data:{status,request_id:'terminal-'+status}});assert.equal(response.status(),400);}
  assert.equal(await card.getByRole('button',{name:/^(开始|继续学习|暂停|延期)$/}).count(),0);
  const plans=(await get('/api/learning/plans')).plans;const second=plans[0].tasks.find(t=>t.id!==id);
- const secondCard=page.locator(`#learning-plans [data-task-id="${second.id}"]`);await secondCard.getByRole('button',{name:'取消任务',exact:true}).click();await settle();
+ await page.locator('#learning-saved').click();await page.locator('.learning-plan>summary').click();await page.locator(`#learning-plans [data-task-entry="${second.id}"] button`).click();const secondCard=page.locator(`#learning-task-workspace [data-task-id="${second.id}"]`);await secondCard.getByRole('button',{name:'取消任务',exact:true}).click();await settle();
  assert.equal(await secondCard.getByRole('button',{name:/^(开始|继续学习|暂停|延期)$/}).count(),0);
  assert.equal((await get('/api/tasks/'+id+'/progress')).progress.length,1);
  assert.deepEqual(errors,[]);

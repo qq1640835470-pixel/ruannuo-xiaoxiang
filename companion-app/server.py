@@ -891,7 +891,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(200,result)
             if p=='/api/learning/reminders':return self.send(200,reminder_call('view'))
             if p=='/api/learning/resources':
-                with connect() as c:result=learning_resources.listing(c)
+                with connect() as c:result=learning_resources.listing(c,urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('task_id',[''])[0])
                 return self.send(200,result)
             if p=='/api/learning/resources/receipt':
                 ident=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('id',[''])[0]

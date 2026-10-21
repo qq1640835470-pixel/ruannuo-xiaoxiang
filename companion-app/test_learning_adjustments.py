@@ -250,7 +250,7 @@ class AdjustmentTests(unittest.TestCase):
 
     def test_http_auth_generate_confirm_cancel_and_sanitized_failure(self):
         selection=self.selection()
-        with self.http() as (base,request),patch('server.learning_selection',return_value=MODEL):
+        with self.http() as (base,request),patch('server.learning_selection',return_value=MODEL),patch('server.now',return_value=TODAY+'T10:00:00+08:00'):
             path='/api/learning/adjustments'
             with self.assertRaises(urllib.error.HTTPError) as exc:urllib.request.urlopen(base+path+'/options?goal_id='+selection['goal_id'])
             self.assertEqual(exc.exception.code,403)

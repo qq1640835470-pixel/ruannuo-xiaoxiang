@@ -22,13 +22,13 @@ const learning='vendor/independent-learning',other='vendor/other-chat';
   await page.locator('#model-center-search').fill(other);await page.locator(`[data-model-id="${other}"]`).getByRole('button',{name:'用作聊天模型（再保存设置）',exact:true}).click();
   await page.locator('#save-settings').click();await page.locator('#settings-save-status').filter({hasText:'设置已保存'}).waitFor();
   let s=await (await page.request.get(base+'/api/settings')).json();assert.equal(s.chat_models.openrouter,other);assert.equal(s.learning_selection.model,learning);
-  await page.locator('#settings-close').click();await page.locator('#learning-model-evidence').filter({hasText:'候选'}).waitFor();
+  await page.locator('#settings-close').click();await page.locator('#learning-model-evidence').locator('..').locator('summary').click();await page.locator('#learning-model-evidence').filter({hasText:'候选'}).waitFor();
   // A successful response is lost: reload must recover the same request with no second generation.
-  lose=true;await page.locator('#learning-request').fill('合成节点法要求');await page.locator('#learning-input button').click();
+  await page.locator('#learning-new').click();lose=true;await page.locator('#learning-request').fill('合成节点法要求');await page.locator('#learning-input button').click();
   await page.locator('#learning-generation-pending').filter({hasText:'回执待核'}).waitFor();
   await page.reload();await page.getByRole('button',{name:'核对同一学习生成请求',exact:true}).click();
   await page.locator('#learning-status').filter({hasText:'已恢复同一请求结果'}).waitFor();assert.deepEqual(requests[0],requests[1]);
-  await page.locator('#check-topic').fill('节点法');await page.locator('#check-generate button[type=submit]').click();await page.locator('#check-current').filter({hasText:'请求 '+learning+' → 返回 '+learning}).waitFor();
+  await page.locator('#learning-checks>summary').click();await page.locator('#check-topic').fill('节点法');await page.locator('#check-generate button[type=submit]').click();await page.locator('#check-current').filter({hasText:'请求 '+learning+' → 返回 '+learning}).waitFor();
   assert(dialogs.some(d=>d.includes(learning)));assert.doesNotMatch(await page.locator('#learning-model-evidence').textContent(),/本机已验证/);
   // Change settings in a different client between confirmation preview and actual submission.
   swap=true;await page.locator('#check-generate button[type=submit]').click();await page.locator('#check-status').filter({hasText:'学习模型选择已变化'}).waitFor();
