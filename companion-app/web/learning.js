@@ -118,7 +118,7 @@
       taskNotice(`${status==='paused'?'任务已暂停':status==='active'?'任务已开始学习':status==='done'?'任务已完成':'任务已取消'}：“${current.title}”。已保存并核对。`,task.id,status,true);
     }else taskNotice(`“${current.title}”已经是${statuses[status]}，未重复写入。`,task.id,status,true);
     pendingTask=null;persist();focusTaskId=task.id;await refresh();
-    if(status==='active')$('#learning-current').scrollIntoView({block:'start'});
+    if(status==='active'){$('#learning-current').scrollIntoView({block:'start'});window.LearningResourceAuto?.start(task.id).catch(e=>message('学习已开始；资料搜索未启动：'+e.message));}
     }catch(e){
       taskNotice(`${action}未完成：${e.message}${pendingTask?' 请核对同一待处理请求，勿另建请求。':''}`,task.id,status);
       try{await refresh();}catch(refreshError){taskNotice(`${taskFeedback.text} 列表刷新也未完成：${refreshError.message}`,task.id,status);}
@@ -147,13 +147,14 @@
     const resources=node('section');resources.id='learning-task-resources';resources.append(node('h4','本任务已关联资源'));card.append(resources);area.append(card);
     try{
       const response=await api('/api/learning/resources?task_id='+encodeURIComponent(task.id));
-      if(!response.resources.length)resources.append(node('p','尚未关联资源，可从“查找更多相关资源”进入，核对关键词后再确认搜索。'));
+      if(!response.resources.length)resources.append(node('p','尚未收藏关联资源；可在下方开启自动搜索，或使用手动资源入口。'));
       for(const row of response.resources){
         const url=new URL(row.url);if(!['https:','http:'].includes(url.protocol))continue;
         const link=node('a',row.title);link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';link.referrerPolicy='no-referrer';
         resources.append(link,node('p',`${row.source} · ${{video:'视频',text:'教材/讲义',practice:'练习题'}[row.kind]||'资源'} · 原文未读取，链接可访问性待核对。`));
       }
     }catch(e){resources.append(node('p','关联资源读取失败：'+e.message+'；可刷新重试。'));}
+    try{await window.LearningResourceAuto?.attach(card,task);}catch(e){card.append(node('p','任务资料状态读取失败：'+e.message));}
     progressView(card,task);
   }
   function taskEntry(parent,task,saved){

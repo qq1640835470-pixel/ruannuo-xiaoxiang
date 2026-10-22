@@ -314,6 +314,21 @@ def learning_model(content,instruction,max_tokens,*,expected_selection=None):
     finally:CHAT_LOCK.release()
 
 
+def resource_model_preflight():
+    s=settings();selected=learning_selection(s)
+    provider,model=selected['provider'],selected['model']
+    if provider=='local':
+        if not local_runtime.status()['installed']:raise ValueError('学习模型尚未安装，请到设置选择可用模型。')
+        if model!='auto' and not local_models.installed(model):raise ValueError('学习模型未校验，请到设置检查。')
+    else:
+        if not s['api_generation_enabled']:raise ValueError('云模型生成已关闭，请到设置启用。')
+        if not providers.hub.load_keys().get(provider):raise ValueError('学习模型缺少凭据，请到设置配置。')
+        remaining=budget()['remaining_cny']
+        amount=providers.reservation(provider,model,remaining or 0,{'input_token_upper_bound':110000,'max_output_tokens':2400})
+        if remaining is not None and (remaining<=0 or amount>remaining):raise ValueError('学习模型预算不足，请到用量设置检查。')
+    return selected
+
+
 def learning_save(body):
     with LOCK,connect() as c:result=learning.save(c,body)
     return result
@@ -861,7 +876,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith('/api/'):
             route=urllib.parse.urlsplit(self.path).path
             if re.match(r'^/api/(?:tasks|goals|progress|feedback|feedback-drafts|actions)/',route):route='/'.join(route.split('/')[:3])+'/:id'
-            elif route not in ('/api/local/status','/api/local/preferences','/api/local/maintenance','/api/browser/open','/api/browser/status','/api/health','/api/models','/api/state','/api/chat','/api/settings','/api/connectors','/api/balances','/api/balances/refresh','/api/usage','/api/export','/api/feedback','/api/feedback-drafts','/api/diagnostics','/api/diagnostics/client','/api/companion/chat','/api/speech','/api/shutdown'):route='/api/unknown'
+            elif not route.startswith('/api/learning/resources/auto') and route not in ('/api/learning/resources','/api/learning/resources/preview','/api/learning/resources/analyze','/api/learning/resources/search','/api/learning/resources/save','/api/learning/resources/receipt','/api/local/status','/api/local/preferences','/api/local/maintenance','/api/browser/open','/api/browser/status','/api/health','/api/models','/api/state','/api/chat','/api/settings','/api/connectors','/api/balances','/api/balances/refresh','/api/usage','/api/export','/api/feedback','/api/feedback-drafts','/api/diagnostics','/api/diagnostics/client','/api/companion/chat','/api/speech','/api/shutdown'):route='/api/unknown'
             runtime_log.event('http_request','error' if status>=500 else 'warning' if status>=400 else 'info',method=self.command,route=route,status=status,duration_ms=round((time.monotonic()-getattr(self,'request_started',time.monotonic()))*1000,2))
     def permitted(self,mutate=False):
         allowed={f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'}
@@ -890,6 +905,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with connect() as c:result=model_center.catalogue(c,VERSION)
                 return self.send(200,result)
             if p=='/api/learning/reminders':return self.send(200,reminder_call('view'))
+            if p=='/api/learning/resources/auto':
+                task_id=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('task_id',[''])[0]
+                with connect() as c:result=learning_resources.auto_view(c,task_id)
+                return self.send(200,result)
             if p=='/api/learning/resources':
                 with connect() as c:result=learning_resources.listing(c,urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('task_id',[''])[0])
                 return self.send(200,result)
@@ -1009,6 +1028,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method=='POST' and p=='/api/learning/model-preview':return self.send(200,learning_model_preview(b))
             if method=='POST' and p=='/api/learning/resources/preview':
                 return self.send(200,learning_resources.plan(b))
+            if method=='POST' and p=='/api/learning/resources/auto/policy':
+                with LOCK,connect() as c:result=learning_resources.auto_policy(c,b)
+                return self.send(200,result)
+            if method=='POST' and p=='/api/learning/resources/auto/stop':
+                with LOCK,connect() as c:result=learning_resources.auto_stop(c,b)
+                return self.send(200,result)
+            if method=='POST' and p=='/api/learning/resources/auto/feedback':
+                with LOCK,connect() as c:result=learning_resources.auto_feedback(c,b)
+                return self.send(200,result)
+            if method=='POST' and p=='/api/learning/resources/auto/search':
+                selection={}
+                def preflight():selection.update(resource_model_preflight())
+                def rank(content,instruction,max_tokens):return learning_model(content,instruction,max_tokens,expected_selection=selection)
+                return self.send(200,learning_resources.auto_search(connect,b,providers.hub,rank,preflight))
             if method=='POST' and p=='/api/learning/resources/analyze':
                 return self.send(200,learning_resources.execute(connect,'analyze',b,model=learning_call(b.get('model_selection'))))
             if method=='POST' and p=='/api/learning/resources/search':

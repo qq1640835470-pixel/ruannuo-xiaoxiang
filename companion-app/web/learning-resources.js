@@ -3,7 +3,7 @@
   const root=document.getElementById('learning-resources');
   const $=id=>document.getElementById('resources-'+id);
   const kinds={video:'视频',text:'教材/讲义',practice:'练习题'},key='xiaoxiang-learning-resources-v1';
-  let busy=false,pending=null,search=null,preview=null,taskId="";
+  let busy=false,pending=null,search=null,preview=null,taskId="",restoreReceipt=false;
   function node(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
   function status(text){
     const id=pending?.body.request_id||search?.request_id;
@@ -21,6 +21,14 @@
     $('save').disabled=busy||!!pending||!search?.result?.results?.length;
   }
   async function run(action,allowPending=false){if(busy)return;if(pending&&!allowPending){status('请先核对原请求回执，或明确放弃本地标记；未发送新请求。');controls();return;}busy=true;controls();root.setAttribute('aria-busy','true');try{await action();}catch(e){status(e.message||'操作未完成，请核对原回执。');}finally{busy=false;root.removeAttribute('aria-busy');controls();}}
+  async function request(path,options={}){
+    const controller=new AbortController();
+    const milliseconds=path.endsWith('/search')?90000:path.endsWith('/analyze')?150000:15000;
+    let timer;
+    const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('等待服务响应超时，本次等待已结束。若有待核请求，请核对原回执；不会自动重发搜索或模型调用。'));},milliseconds);});
+    try{return await Promise.race([api(path,{...options,signal:controller.signal}),timeout]);}
+    finally{clearTimeout(timer);}
+  }
   function clearPreview(){preview=null;$('preview').hidden=true;$('preview').replaceChildren();}
   function link(row){
     const a=node('a',row.title);const u=new URL(row.url);
@@ -41,12 +49,12 @@
     search=response;$('results').replaceChildren();const data=response.result;
     if(!data)return;
     for(const row of data.results)$('results').append(card(row,true));
-    const errors=data.errors.map(e=>e.detail).join(' ');
+    const errors=data.errors.map(e=>e.code==='free_only'?'免费额度核验未通过。请重新预览关键词，展开“免费赠送额度确认”并核对控制台；核对旧回执不会重新搜索。':e.detail).join(' ');
     status(`${data.status==='empty'?'没有找到符合条件的资源。':data.status==='unavailable'?'本次搜索未取得有效结果。':`找到 ${data.results.length} 条资源。`} ${errors} ${data.missing_kinds.length?'未找到：'+data.missing_kinds.join('、')+'。':''} 供应商已报告用量 ${data.credits_reported} credits${data.usage_uncertain?'，另有用量待核对':''}。${data.note}`);
     persist();
   }
   async function refresh(){
-    const [saved,plans]=await Promise.all([api('/api/learning/resources'),api('/api/learning/plans')]);
+    const [saved,plans]=await Promise.all([request('/api/learning/resources'),request('/api/learning/plans')]);
     $('saved').replaceChildren(node('h4',`已保存资源（最近100条，当前 ${saved.resources.length} 条）`));
     if(!saved.resources.length)$('saved').append(node('p','还没有保存资源。'));
     for(const row of saved.resources)$('saved').append(card(row));
@@ -66,25 +74,38 @@
     if(path.endsWith('/search')){search=null;$('results').replaceChildren();}
     pending={path,body:{request_id:crypto.randomUUID().replaceAll('-',''),...body}};persist();controls();
     status('正在处理，请等待回执；断网不会自动重试。');
-    try{const response=await api(path,{method:'POST',body:JSON.stringify(pending.body)});await accept(response,path);}
+    try{const response=await request(path,{method:'POST',body:JSON.stringify(pending.body)});await accept(response,path);}
     catch(e){if(pending)status(`回执待核对，请求 ${pending.body.request_id}。${e.message} 使用“核对原请求回执”，不会重发。`);else throw e;}
   }
   $('analyze').onclick=()=>run(async()=>{
     const text=$('request').value.trim();if(!text)throw Error('请先填写资源需求，或直接填写具体知识点。');
-    const selection=await window.XYLearning.confirm('resource_analyze',{text});
+    status('正在核对学习模型；也可直接填写知识点，跳过模型整理。');
+    const selection=await window.XYLearning.confirm('resource_analyze',{text},undefined,request);
     await send('/api/learning/resources/analyze',{text,confirmed:true,model_selection:selection});
   });
   $('form').onsubmit=e=>{e.preventDefault();run(async()=>{
-    preview=await api('/api/learning/resources/preview',{method:'POST',body:JSON.stringify(requirements())});
+    status('正在预览关键词（不联网）…');
+    preview=await request('/api/learning/resources/preview',{method:'POST',body:JSON.stringify(requirements())});
     const area=$('preview');area.replaceChildren(node('h4','搜索关键词 · 可编辑'));area.hidden=false;
     const inputs=[];
     for(const query of preview.queries){const label=node('label',kinds[query.kind]),input=node('input');input.value=query.query;input.maxLength=180;label.append(input);area.append(label);inputs.push(input);}
     area.append(node('p',preview.destination),node('p',`最多 ${preview.max_credits} 次 Basic 查询 / ${preview.max_credits} credits；不调用模型，不自动重试或切换服务。`));
+    const account=node('details');account.append(node('summary','免费赠送额度确认（仅本次）'));
+    account.append(node('p','如果账号含额外免费赠送额度，或接口无法明确报告 PAYG 状态，请先在 Tavily 控制台核实。填写的是免费额度总上限，不是剩余额度；本程序仍会检查套餐、实际余额和Key限额。此确认不会保存为长期授权。'));
+    const limitLabel=node('label','控制台确认的免费额度总上限（credits）'),limit=node('input');limit.id='resources-free-limit';limit.type='number';limit.min=1;limit.max=1000000;limit.step=1;limitLabel.append(limit);account.append(limitLabel);
+    const consentLabel=node('label'),consent=node('input');consent.type='checkbox';consent.id='resources-free-consent';consentLabel.className='check-option';consentLabel.append(consent,node('span','我已在控制台确认上述额度全部免费，且 PAYG 已关闭，仅对本次搜索有效'));account.append(consentLabel);area.append(account);
     const b=node('button','确认关键词并开始真实搜索');b.type='button';b.className='primary-button';area.append(b);
     b.onclick=()=>run(async()=>{
       const qs=preview.queries.map((q,i)=>({...q,query:inputs[i].value.trim()}));
-      if(!confirm(`将以下查询词发送给 Tavily：\n${qs.map(q=>q.query).join('\n')}\n最多 ${preview.max_credits} credits，仅免费套餐且按量付费关闭时执行。确认搜索？`))return;
-      await send('/api/learning/resources/search',{requirements:preview.requirements,queries:qs,confirmed:true});
+      let freeConfirmation;
+      if(limit.value||consent.checked){
+        const value=Number(limit.value);
+        if(!consent.checked||!Number.isInteger(value)||value<1||value>1000000)throw Error('请填写准确的免费额度总上限，并明确勾选本次免费额度及 PAYG 关闭确认。');
+        freeConfirmation={free_limit:value,paygo_disabled:true};
+      }
+      if(!confirm(`将以下查询词发送给 Tavily：\n${qs.map(q=>q.query).join('\n')}\n最多 ${preview.max_credits} credits，仅免费套餐且按量付费关闭时执行。${freeConfirmation?'\n本次人工核对免费总上限：'+freeConfirmation.free_limit+' credits；PAYG 已关闭。':''}确认搜索？`)){consent.checked=false;return;}
+      consent.checked=false;limit.value='';
+      await send('/api/learning/resources/search',{requirements:preview.requirements,queries:qs,confirmed:true,...(freeConfirmation?{free_account_confirmation:freeConfirmation}:{})});
     });status('关键词预览完成，未联网。');
   });};
   $('save').onclick=()=>run(async()=>{
@@ -92,7 +113,7 @@
     if(!ids.length)throw Error('请先勾选资源。');
     await send('/api/learning/resources/save',{search_id:search.request_id,resource_ids:ids,task_id:$('task').value});
   });
-  $('recover').onclick=()=>run(async()=>{const path=pending.path;await accept(await api('/api/learning/resources/receipt?id='+encodeURIComponent(pending.body.request_id)),path);},true);
+  $('recover').onclick=()=>run(async()=>{const path=pending.path;await accept(await request('/api/learning/resources/receipt?id='+encodeURIComponent(pending.body.request_id)),path);},true);
   $('dismiss').onclick=()=>run(async()=>{
     if(!confirm('只移除本浏览器待核对标记，不会取消服务端请求或重发。若原请求已执行，新的请求可能再次消耗额度。确认放弃标记？'))return;
     pending=null;persist();status('已放弃本地待核对标记，没有重发请求。');
@@ -109,7 +130,7 @@
     });root.scrollIntoView({block:'start'});
   }};
   $('task').onchange=()=>{taskId=$('task').value;persist();};
-  $('refresh').onclick=()=>run(refresh);
+  $('refresh').onclick=()=>run(async()=>{status('正在读取已保存资源和任务…');await refresh();status('已读取保存的资源和任务。');});
   $('form').addEventListener('input',()=>{clearPreview();persist();});
   $('request').addEventListener('input',persist);
   window.addEventListener('learning-model-changed',()=>{clearPreview();});
@@ -120,8 +141,9 @@
     if(saved){$('request').value=saved.text||'';fill(saved.requirements);pending=saved.pending||null;taskId=saved.taskId||'';
       if(pending){root.open=true;}
       if(pending)status(`请求 ${pending.body.request_id} 待核对，未自动重发。`);
-      else if(saved.searchId){pending={path:'/api/learning/resources/search',body:{request_id:saved.searchId}};status('上次搜索结果可通过“核对原请求回执”恢复，不会重新搜索。');}
+      else if(saved.searchId){pending={path:'/api/learning/resources/search',body:{request_id:saved.searchId}};restoreReceipt=true;root.open=true;status('正在读取上次已结束搜索的回执，不会重新搜索。');}
     }
   }catch{status('资源草稿读取失败，请重新填写。');}
   controls();
+  if(restoreReceipt)void run(async()=>{await accept(await request('/api/learning/resources/receipt?id='+encodeURIComponent(pending.body.request_id)),pending.path);await refresh();loaded=true;},true);
 })();

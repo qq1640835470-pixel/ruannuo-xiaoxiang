@@ -164,6 +164,60 @@ class ResourceTests(unittest.TestCase):
         with self.assertRaises(resources.ResourceError):
             resources.free_allowance(value, 3, confirmed_free_limit=1500)
 
+    def test_http_per_request_free_confirmation_and_replay(self):
+        value = copy.deepcopy(FREE)
+        value['account'].update(plan_limit=1500, paygo_limit=None)
+        value['key']['limit'] = None
+        def transport(path, key, body=None):
+            return copy.deepcopy(value) if path == 'usage' else {'results': copy.deepcopy(ROWS), 'usage': {'credits': 1}}
+        with patch('learning_resources.request_json', side_effect=transport) as call:
+            blocked = self.search('unconfirmed-1500')
+            self.assertEqual(blocked['result']['errors'][0]['code'], 'free_only')
+            self.assertEqual(call.call_count, 1)
+            body = {**self.body('confirmed-1500'), 'free_account_confirmation': {'free_limit': 1500, 'paygo_disabled': True}}
+            out = self.r('/api/learning/resources/search', body, 'POST')
+            self.assertEqual(out['result']['status'], 'ok')
+            self.assertEqual(out['result']['credits_reported'], 3)
+            before = call.call_count
+            self.assertEqual(out, self.r('/api/learning/resources/search', body, 'POST'))
+            self.assertEqual(out, self.r('/api/learning/resources/receipt?id=confirmed-1500'))
+            self.assertEqual(call.call_count, before)
+            changed = copy.deepcopy(body);changed['free_account_confirmation']['free_limit'] = 2000
+            with self.assertRaises(urllib.error.HTTPError):self.r('/api/learning/resources/search', changed, 'POST')
+            self.assertEqual(call.call_count, before)
+            self.assertEqual(self.search('next-unconfirmed')['result']['errors'][0]['code'], 'free_only')
+
+    def test_free_confirmation_never_overrides_paid_unknown_or_quota(self):
+        for index, (change, expected) in enumerate([
+                ({'plan_limit': 2000}, 'free_only'), ({'paygo_limit': 1}, 'free_only'),
+                ({'paygo_usage': 1}, 'free_only'), ({'current_plan': 'Bootstrap'}, 'free_only'),
+                ({'plan_usage': 1498}, 'quota'), ({'paygo_limit': 'missing'}, 'free_only')]):
+            value = copy.deepcopy(FREE);value['account'].update(plan_limit=1500, paygo_limit=None)
+            value['account'].update(change)
+            if value['account']['paygo_limit'] == 'missing':del value['account']['paygo_limit']
+            body = {**self.body('confirm-guard-'+str(index)), 'free_account_confirmation': {'free_limit': 1500, 'paygo_disabled': True}}
+            with patch('learning_resources.request_json', return_value=value) as call:
+                out = self.r('/api/learning/resources/search', body, 'POST')
+                self.assertEqual(out['result']['errors'][0]['code'], expected)
+                self.assertEqual(call.call_count, 1)
+        for index, invalid in enumerate([{}, {'free_limit': 1500, 'paygo_disabled': False},
+                {'free_limit': True, 'paygo_disabled': True}, {'free_limit': '1500', 'paygo_disabled': True}]):
+            body = {**self.body('invalid-confirm-'+str(index)), 'free_account_confirmation': invalid}
+            with patch('learning_resources.request_json') as call:
+                with self.assertRaises(urllib.error.HTTPError):self.r('/api/learning/resources/search', body, 'POST')
+                call.assert_not_called()
+
+    def test_search_block_logs_only_safe_stage_and_routes(self):
+        with patch('learning_resources.request_json', return_value={}), patch('runtime_log.event') as event:
+            out = self.search('log-block')
+        self.assertEqual(out['result']['errors'][0]['code'], 'free_only')
+        event.assert_any_call('learning_resource_search_stopped', 'warning', operation='usage', category='free_only', count=0)
+        with patch('runtime_log.event') as event:
+            self.r('/api/learning/resources/receipt?id=log-block')
+        calls=[c for c in event.call_args_list if c.args[0]=='http_request']
+        self.assertEqual(calls[-1].kwargs['route'], '/api/learning/resources/receipt')
+        self.assertNotIn('log-block', json.dumps(calls[-1].kwargs))
+
     def test_empty_and_unrelated_never_fabricated(self):
         for i, rows in enumerate([[], [ROWS[4]], [{'title': '差分放大电路资料', 'url': 'https://course.example.org/', 'content': '差分放大电路'}]]):
             def transport(path, key, body=None):return FREE if path == 'usage' else {'results': rows, 'usage': {'credits': 1}}

@@ -50,8 +50,8 @@
       $('learning-model-id').replaceChildren(new Option(`${model}（当前选择）`,model));changed();catalogue();
     },
     savePayload(){return {learning_model_config:$('learning-model-mode').value==='follow'?{mode:'follow',provider:'',model:''}:{mode:'independent',provider:$('learning-model-provider').value,model:$('learning-model-id').value}};},
-    async confirm(operation,body,checkId){
-      const preview=await api('/api/learning/model-preview',{method:'POST',body:JSON.stringify({operation,body,...(checkId?{check_id:checkId}:{})})});
+    async confirm(operation,body,checkId,request=api){
+      const preview=await request('/api/learning/model-preview',{method:'POST',body:JSON.stringify({operation,body,...(checkId?{check_id:checkId}:{})})});
       if(!confirm(`本次学习模型：${label(preview.model)}\n仅发送本页已选内容${operation==='evaluate'?'及本次简答题、参考要点和答案':''}；云模型可能计费。确认发送？`))throw Error('已取消，未调用学习模型。');
       $('learning-model-current').textContent=`本次即将调用：${label(preview.model)}。`;return preview.model;
     }
